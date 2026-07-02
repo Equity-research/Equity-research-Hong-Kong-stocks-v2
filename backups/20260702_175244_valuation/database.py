@@ -59,7 +59,7 @@ def initialize() -> None:
             sample_metrics = {item["code"]: item["metrics"] for item in SAMPLE_IPOS}
             for row in rows:
                 metrics = json.loads(row["metrics_json"])
-                if row["code"] in sample_metrics:
+                if row["is_sample"] and row["code"] in sample_metrics:
                     metrics.update(sample_metrics[row["code"]])
                 dimensions, score = score_ipo(metrics)
                 db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
