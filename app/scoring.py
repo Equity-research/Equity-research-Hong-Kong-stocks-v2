@@ -1,39 +1,69 @@
+from typing import Any
+
 from app.config import load_rules
 from app.schemas import DimensionScore
 
 
-def _normalize(value: float, minimum: float, maximum: float, higher_is_better: bool) -> float:
-    ratio = max(0.0, min(1.0, (value - minimum) / (maximum - minimum)))
-    return ratio if higher_is_better else 1 - ratio
+def _band_score(value: float, bands: list[dict[str, float]]) -> float:
+    for band in bands:
+        if "greater_than" in band and value > band["greater_than"]:
+            return float(band["score"])
+        if "min" in band and value >= band["min"]:
+            return float(band["score"])
+    return 0.0
 
 
-def score_ipo(metrics: dict[str, float | None]) -> tuple[list[DimensionScore], float]:
+def _boolean_dimension(key: str, rule: dict[str, Any], metrics: dict[str, Any]) -> DimensionScore:
+    metric = rule["metric"]
+    value = metrics.get(metric)
+    missing = [] if value is not None else [rule["label"]]
+    if rule.get("requires") and not metrics.get(rule["requires"]):
+        score = 0.0
+        reason = f'{rule["label"]}：无基石投资者，不计分'
+    elif value is None:
+        score = 0.0
+        reason = f'{rule["label"]}：数据缺失，计 0 分'
+    else:
+        score = float(rule["weight"] if value else 0)
+        reason = f'{rule["label"]}：{"符合" if value else "不符合"}，贡献 {score:g}/{rule["weight"]}'
+    return DimensionScore(key=key, label=rule["label"], score=score, weight=rule["weight"],
+                          reasons=[reason], missing=missing)
+
+
+def score_ipo(metrics: dict[str, Any]) -> tuple[list[DimensionScore], float]:
     rules = load_rules()
     dimensions: list[DimensionScore] = []
-    for key, dimension in rules["dimensions"].items():
-        total = 0.0
-        reasons: list[str] = []
-        missing: list[str] = []
-        for metric_key, indicator in dimension["indicators"].items():
-            value = metrics.get(metric_key)
-            if value is None:
-                missing.append(indicator["label"])
-                normalized = 0.5
-                reasons.append(f'{indicator["label"]}：缺失，按中性值计分')
-            else:
-                normalized = _normalize(value, indicator["min"], indicator["max"], indicator["higher_is_better"])
-                reasons.append(f'{indicator["label"]}：{value:g}，贡献 {normalized * indicator["weight"]:.1f}/{indicator["weight"]}')
-            total += normalized * indicator["weight"]
-        dimensions.append(DimensionScore(key=key, label=dimension["label"], score=round(total, 1),
-                                         weight=dimension["weight"], reasons=reasons, missing=missing))
+    for key, rule in rules["dimensions"].items():
+        if key in {"cornerstone_presence", "cornerstone_quality", "greenshoe", "sponsor"}:
+            dimensions.append(_boolean_dimension(key, rule, metrics))
+            continue
+
+        if key == "subscription":
+            value = metrics.get(rule["metric"])
+            score = 0.0 if value is None else _band_score(float(value), rule["bands"])
+            missing = [rule["label"]] if value is None else []
+            reason = (f'{rule["label"]}：数据缺失，计 0 分' if value is None else
+                      f'{rule["label"]}：{value:g} 倍，贡献 {score:g}/{rule["weight"]}')
+        else:
+            is_ah = bool(metrics.get("is_ah"))
+            metric = rule["ah_metric"] if is_ah else rule["peer_metric"]
+            bands = rule["ah_bands"] if is_ah else rule["peer_bands"]
+            value = metrics.get(metric)
+            score = 0.0 if value is None else _band_score(float(value), bands)
+            missing = ["A/H 溢价" if is_ah else "相对同业估值折价"] if value is None else []
+            basis = "A/H 溢价" if is_ah else "相对同业估值折价"
+            reason = (f'{basis}：数据缺失，计 0 分' if value is None else
+                      f'{basis}：{value:g}%，贡献 {score:g}/{rule["weight"]}')
+        dimensions.append(DimensionScore(key=key, label=rule["label"], score=score,
+                                         weight=rule["weight"], reasons=[reason], missing=missing))
     final = round(sum(item.score for item in dimensions), 1)
     return dimensions, final
 
 
 def recommendation(score: float) -> str:
-    if score >= 75:
-        return "申购"
-    if score >= 55:
-        return "观望"
-    return "回避"
-
+    rules = load_rules()["recommendations"]
+    if score >= rules["buy"]["min"]:
+        return rules["buy"]["label"]
+    if score >= rules["hold"]["min"]:
+        return rules["hold"]["label"]
+    return rules["avoid"]["label"]

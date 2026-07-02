@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -13,7 +13,7 @@ class DimensionScore(BaseModel):
 
 
 class AdjustmentCreate(BaseModel):
-    value: float = Field(ge=-10, le=10)
+    value: float = Field(ge=-1, le=1)
     reason: str = Field(min_length=10, max_length=200)
     operator: str = Field(default="本地用户", min_length=1, max_length=40)
 
@@ -44,6 +44,8 @@ class IPOBase(BaseModel):
     industry: str
     price_low: float
     price_high: float
+    minimum_subscription_amount: float | None = None
+    subscription_multiple: float | None = None
     deadline: date
     is_sample: bool
     original_score: float
@@ -52,18 +54,37 @@ class IPOBase(BaseModel):
     recommendation: Literal["申购", "观望", "回避"]
 
 
+class AllotmentDifficulty(BaseModel):
+    label: str
+    companies: list[str]
+    note: str | None = None
+
+
+class ReportInsights(BaseModel):
+    fundamental_valuation_ranking: list[list[str]] = []
+    allotment_difficulty: list[AllotmentDifficulty] = []
+
+
 class IPOList(BaseModel):
     items: list[IPOBase]
     total: int
     page: int
     page_size: int
+    insights: ReportInsights = ReportInsights()
 
 
 class IPODetail(IPOBase):
     dimensions: list[DimensionScore]
     risks: list[str]
-    metrics: dict[str, float | None]
+    metrics: dict[str, Any]
     adjustments: list[Adjustment]
+    issuance_shares: float | None = None
+    lot_size: int | None = None
+    greenshoe: bool | None = None
+    cornerstone_investors: list[str] = []
+    cornerstone_ratio: float | None = None
+    sponsors: list[str] = []
+    company_quality: list[str] = []
 
 
 class ReportSummary(BaseModel):
@@ -79,4 +100,3 @@ class ReportSummary(BaseModel):
 
 class ReportDetail(ReportSummary):
     markdown: str
-

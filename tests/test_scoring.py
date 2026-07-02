@@ -1,16 +1,34 @@
 from app.scoring import recommendation, score_ipo
 
 
-def test_dimension_weights_sum_to_100():
+def test_dimension_weights_sum_to_10_and_missing_scores_zero():
     dimensions, score = score_ipo({})
-    assert sum(item.weight for item in dimensions) == 100
-    assert score == 50
+    assert sum(item.weight for item in dimensions) == 10
+    assert score == 0
     assert all(item.missing for item in dimensions)
 
 
 def test_recommendation_boundaries():
-    assert recommendation(75) == "申购"
-    assert recommendation(74.99) == "观望"
-    assert recommendation(55) == "观望"
-    assert recommendation(54.99) == "回避"
+    assert recommendation(8) == "申购"
+    assert recommendation(7.99) == "观望"
+    assert recommendation(4) == "观望"
+    assert recommendation(3.99) == "回避"
 
+
+def test_ah_scoring_boundaries():
+    base = {"has_cornerstone": True, "cornerstone_quality_good": True, "greenshoe": True,
+            "subscription_multiple": 100, "is_ah": True, "sponsor_quality_good": True}
+    expected = [(30, 7), (30.01, 8), (50, 8), (50.01, 9), (70, 9), (70.01, 10)]
+    for premium, total in expected:
+        _, score = score_ipo({**base, "ah_premium": premium})
+        assert score == total
+
+
+def test_subscription_boundaries_and_peer_valuation():
+    base = {"has_cornerstone": False, "cornerstone_quality_good": True, "greenshoe": False,
+            "is_ah": False, "peer_valuation_discount": 31, "sponsor_quality_good": False}
+    expected = [(9.99, 3), (10, 4), (50, 5), (100, 6)]
+    for multiple, total in expected:
+        dimensions, score = score_ipo({**base, "subscription_multiple": multiple})
+        assert score == total
+        assert next(item for item in dimensions if item.key == "cornerstone_quality").score == 0

@@ -1,45 +1,52 @@
-version: 1
+version: 2
+scale: 10
 dimensions:
-  fundamentals:
-    label: 基本面
-    weight: 30
-    indicators:
-      revenue_growth: {label: 营收增长率, weight: 10, min: -20, max: 50, higher_is_better: true}
-      profit_growth: {label: 净利润增长率, weight: 7, min: -30, max: 60, higher_is_better: true}
-      net_margin: {label: 净利率, weight: 6, min: -10, max: 30, higher_is_better: true}
-      debt_ratio: {label: 负债率, weight: 7, min: 20, max: 90, higher_is_better: false}
-  issuance:
-    label: 发行结构
-    weight: 25
-    indicators:
-      cornerstone_ratio: {label: 基石配售比例, weight: 8, min: 0, max: 50, higher_is_better: true}
-      subscription_multiple: {label: 认购倍数, weight: 7, min: 1, max: 100, higher_is_better: true}
-      public_float_ratio: {label: 公众持股比例, weight: 5, min: 10, max: 35, higher_is_better: true}
-      dilution_ratio: {label: 摊薄比例, weight: 5, min: 5, max: 35, higher_is_better: false}
-  industry:
-    label: 行业
-    weight: 15
-    indicators:
-      industry_outlook: {label: 行业景气度, weight: 15, min: 0, max: 100, higher_is_better: true}
+  cornerstone_presence:
+    label: 基石投资者
+    weight: 1
+    metric: has_cornerstone
+  cornerstone_quality:
+    label: 基石质量
+    weight: 1
+    metric: cornerstone_quality_good
+    requires: has_cornerstone
+  greenshoe:
+    label: 绿鞋机制
+    weight: 1
+    metric: greenshoe
+  subscription:
+    label: 公开申购倍数
+    weight: 3
+    metric: subscription_multiple
+    bands:
+      - {min: 100, score: 3}
+      - {min: 50, score: 2}
+      - {min: 10, score: 1}
+      - {min: 0, score: 0}
   valuation:
-    label: 估值
-    weight: 20
-    indicators:
-      pe_discount: {label: 相对同业PE折价, weight: 12, min: -30, max: 40, higher_is_better: true}
-      ps_discount: {label: 相对同业PS折价, weight: 4, min: -30, max: 40, higher_is_better: true}
-      pricing_attractiveness: {label: 定价吸引力, weight: 4, min: 0, max: 100, higher_is_better: true}
-  sentiment:
-    label: 市场情绪
-    weight: 10
-    indicators:
-      news_sentiment: {label: 新闻情绪, weight: 4, min: -1, max: 1, higher_is_better: true}
-      subscription_momentum: {label: 认购动能, weight: 6, min: 0, max: 100, higher_is_better: true}
+    label: 估值吸引力
+    weight: 3
+    ah_metric: ah_premium
+    peer_metric: peer_valuation_discount
+    ah_bands:
+      - {greater_than: 70, score: 3}
+      - {greater_than: 50, score: 2}
+      - {greater_than: 30, score: 1}
+      - {greater_than: -1000000, score: 0}
+    peer_bands:
+      - {greater_than: 30, score: 3}
+      - {min: 10, score: 2}
+      - {min: 0, score: 1}
+      - {min: -1000000, score: 0}
+  sponsor:
+    label: 保荐人及历史表现
+    weight: 1
+    metric: sponsor_quality_good
 recommendations:
-  buy: {min: 75, label: 申购}
-  hold: {min: 55, label: 观望}
+  buy: {min: 8, label: 申购}
+  hold: {min: 4, label: 观望}
   avoid: {min: 0, label: 回避}
 adjustment:
-  min: -10
-  max: 10
+  min: -1
+  max: 1
   reason_min_length: 10
-

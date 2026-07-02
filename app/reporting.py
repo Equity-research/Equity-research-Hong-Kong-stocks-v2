@@ -15,13 +15,13 @@ from app.repository import list_ipos
 
 def _markdown(report_date: date, version: int, items: list[dict]) -> str:
     counts = {label: sum(i["recommendation"] == label for i in items) for label in ("申购", "观望", "回避")}
-    lines = [f"# 港股 IPO 分析日报（{report_date}，v{version}）", "", "> 本报告仅使用样例数据，仅供研究演示，不构成任何投资建议。", "",
+    lines = [f"# 港股 IPO 分析日报（{report_date}，v{version}）", "", "> 本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", "",
              f"共 {len(items)} 个项目：申购 {counts['申购']}，观望 {counts['观望']}，回避 {counts['回避']}。", "",
              "| 公司 | 代码 | 行业 | 招股价(HKD) | 原始分 | 调整 | 最终分 | 建议 |",
              "|---|---|---|---:|---:|---:|---:|---|"]
     for item in items:
         lines.append(f"| {item['name']} | {item['code']} | {item['industry']} | {item['price_low']:.2f}-{item['price_high']:.2f} | {item['original_score']:.1f} | {item['adjustment']:+.1f} | {item['final_score']:.1f} | {item['recommendation']} |")
-    lines += ["", "## 风险提示", "", "- 样例数据并非真实招股资料。", "- IPO 投资存在价格波动、流动性及信息不完整风险。"]
+    lines += ["", "## 风险提示", "", "- 招股期认购倍数仍可能变化，缺失字段不参与加分。", "- IPO 投资存在价格波动、流动性及信息不完整风险。"]
     return "\n".join(lines) + "\n"
 
 
@@ -73,7 +73,7 @@ def report_pdf(report: dict) -> bytes:
     title = ParagraphStyle("CJKTitle", parent=styles["Title"], fontName=font, fontSize=19, leading=25, textColor=colors.HexColor("#0B1739"))
     body = ParagraphStyle("CJKBody", parent=styles["BodyText"], fontName=font, fontSize=9, leading=14)
     story = [Paragraph(f"港股 IPO 分析日报", title), Paragraph(f"{report['report_date']} · 版本 {report['version']}", body), Spacer(1, 6*mm),
-             Paragraph("本报告仅使用样例数据，仅供研究演示，不构成任何投资建议。", body), Spacer(1, 5*mm)]
+             Paragraph("本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", body), Spacer(1, 5*mm)]
     items = list_ipos(page_size=100)["items"]
     data = [["公司", "代码", "行业", "原始分", "调整", "最终分", "建议"]]
     data += [[i["name"], i["code"], i["industry"], f"{i['original_score']:.1f}", f"{i['adjustment']:+.1f}", f"{i['final_score']:.1f}", i["recommendation"]] for i in items]
@@ -84,7 +84,6 @@ def report_pdf(report: dict) -> bytes:
         ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#D9DEE8")), ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F7F9FC")]),
         ("TOPPADDING", (0,0), (-1,-1), 7), ("BOTTOMPADDING", (0,0), (-1,-1), 7)]))
     story += [table, Spacer(1, 7*mm), Paragraph("风险提示", ParagraphStyle("H", parent=body, fontSize=12, leading=17, textColor=colors.HexColor("#0B1739"))),
-              Spacer(1, 2*mm), Paragraph("样例数据并非真实招股资料。IPO 投资存在价格波动、流动性及信息不完整风险。", body)]
+              Spacer(1, 2*mm), Paragraph("招股期认购倍数仍可能变化。IPO 投资存在价格波动、流动性及信息不完整风险。", body)]
     doc.build(story)
     return buffer.getvalue()
-

@@ -48,13 +48,24 @@ def initialize() -> None:
                 db.execute("""INSERT INTO ipos
                     (name, english_name, code, industry, price_low, price_high, deadline, metrics_json,
                      risks_json, dimensions_json, original_score, is_sample)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (item["name"], item["english_name"], item["code"], item["industry"], item["price_low"],
                      item["price_high"], item["deadline"], json.dumps(item["metrics"], ensure_ascii=False),
                      json.dumps(item["risks"], ensure_ascii=False),
-                     json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False), score))
+                     json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False), score,
+                     int(item.get("is_sample", False))))
+        else:
+            rows = db.execute("SELECT id, code, is_sample, metrics_json FROM ipos").fetchall()
+            sample_metrics = {item["code"]: item["metrics"] for item in SAMPLE_IPOS}
+            for row in rows:
+                metrics = json.loads(row["metrics_json"])
+                if row["is_sample"] and row["code"] in sample_metrics:
+                    metrics.update(sample_metrics[row["code"]])
+                dimensions, score = score_ipo(metrics)
+                db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
+                           (json.dumps(metrics, ensure_ascii=False),
+                            json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False), score, row["id"]))
 
 
 def latest_adjustment(db: sqlite3.Connection, ipo_id: int):
     return db.execute("SELECT * FROM adjustments WHERE ipo_id=? ORDER BY id DESC LIMIT 1", (ipo_id,)).fetchone()
-

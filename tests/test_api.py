@@ -16,13 +16,20 @@ def test_api_flow(tmp_path, monkeypatch):
     from app.main import app
     with TestClient(app) as client:
         listing = client.get("/api/ipos").json()
-        assert listing["total"] == 4
+        assert listing["total"] == 16
+        assert all(not item["is_sample"] for item in listing["items"])
+        assert listing["insights"]["fundamental_valuation_ranking"]
+        assert listing["insights"]["allotment_difficulty"]
         ipo_id = listing["items"][0]["id"]
-        bad = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 11, "reason": "这是足够长的调整原因"})
+        detail = client.get(f"/api/ipos/{ipo_id}").json()
+        assert detail["minimum_subscription_amount"] is not None
+        assert detail["issuance_shares"] is not None
+        assert detail["lot_size"] is not None
+        bad = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "这是足够长的调整原因"})
         assert bad.status_code == 422
         short = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "太短"})
         assert short.status_code == 422
-        saved = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "基于样例数据的合理人工调整"})
+        saved = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 1, "reason": "基于本地招股资料的合理人工调整"})
         assert saved.status_code == 201
         first = client.post("/api/reports").json()
         second = client.post("/api/reports").json()
@@ -31,4 +38,3 @@ def test_api_flow(tmp_path, monkeypatch):
         pdf = client.get(f"/api/reports/{first['id']}/download?format=pdf")
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
-
