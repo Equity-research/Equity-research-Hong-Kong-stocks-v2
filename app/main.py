@@ -20,7 +20,7 @@ def startup():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "sample_data": True}
+    return {"status": "ok", "sample_data": False}
 
 
 @app.get("/api/ipos", response_model=IPOList)
@@ -80,4 +80,3 @@ def download_report(report_id: int, format: str = Query(pattern="^(md|pdf)$")):
                         headers={"Content-Disposition": f'attachment; filename="{filename}.md"'})
     return Response(report_pdf(report), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
-
