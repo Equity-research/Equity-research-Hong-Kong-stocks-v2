@@ -1,9 +1,11 @@
 from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from app.config import load_rules
-from app.daily_ipo import DailyIPODataMissingError
+from app.config import ROOT
+from app.daily_ipo import DailyIPODataMissingError, active_subscription_codes
 from app.database import initialize
 from app.repository import list_ipos, get_ipo, add_adjustment
 from app.reporting import create_report, list_reports, get_report, report_pdf
@@ -27,8 +29,15 @@ def health():
 @app.get("/api/ipos", response_model=IPOList)
 def ipos(industry: str | None = None, recommendation: str | None = None, deadline: date | None = None,
          sort: str = "final_score", order: str = Query("desc", pattern="^(asc|desc)$"),
-         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
-    return list_ipos(industry, recommendation, deadline.isoformat() if deadline else None, sort, order, page, page_size)
+         page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+         active: bool = False, report_date: date | None = None):
+    active_codes = None
+    if active:
+        try:
+            active_codes = active_subscription_codes(report_date or date.today())
+        except DailyIPODataMissingError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    return list_ipos(industry, recommendation, deadline.isoformat() if deadline else None, sort, order, page, page_size, active_codes)
 
 
 @app.get("/api/ipos/{ipo_id}", response_model=IPODetail)
@@ -84,3 +93,16 @@ def download_report(report_id: int, format: str = Query(pattern="^(md|pdf)$")):
                         headers={"Content-Disposition": f'attachment; filename="{filename}.md"'})
     return Response(report_pdf(report), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
+
+
+FRONTEND_DIST = ROOT / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend_app(path: str):
+        target = FRONTEND_DIST / path
+        if path and target.is_file():
+            return FileResponse(target)
+        return FileResponse(FRONTEND_DIST / "index.html")

@@ -7,7 +7,7 @@ export interface IPO {
   deadline: string; is_sample: boolean; original_score: number; adjustment: number; final_score: number; recommendation: Recommendation
 }
 export interface IPODetail extends IPO {
-  dimensions: DimensionScore[]; risks: string[]; metrics: Record<string, number | null>; adjustments: Adjustment[];
+  dimensions: DimensionScore[]; risks: string[]; metrics: Record<string, string | number | boolean | null>; adjustments: Adjustment[];
   issuance_shares: number | null; lot_size: number | null; greenshoe: boolean | null;
   cornerstone_investors: string[]; cornerstone_ratio: number | null; sponsors: string[]; company_quality: string[]
 }

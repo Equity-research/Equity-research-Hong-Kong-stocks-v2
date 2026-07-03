@@ -10,7 +10,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from app.ah_premium import ah_premium_path
-from app.database import apply_ah_premiums, apply_subscription_multiples, connect
+from app.database import apply_ah_premiums, apply_daily_ipo_records, apply_subscription_multiples, connect
 from app.daily_ipo import active_subscription_codes
 from app.repository import list_ipos
 from app.subscription import subscription_path
@@ -30,6 +30,7 @@ def _markdown(report_date: date, items: list[dict]) -> str:
 
 def create_report(report_date: date | None = None) -> dict:
     report_date = report_date or date.today()
+    apply_daily_ipo_records(report_date)
     if subscription_path(report_date).exists():
         apply_subscription_multiples(report_date)
     if ah_premium_path(report_date).exists():

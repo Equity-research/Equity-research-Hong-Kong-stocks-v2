@@ -78,6 +78,23 @@ def sync_prospectuses_for_date(record_date: date, root: Path = ROOT) -> Prospect
     return result
 
 
+def prune_prospectus_dirs(keep_date: date, root: Path = ROOT) -> list[Path]:
+    base = root / "prospectuses"
+    if not base.exists():
+        return []
+
+    keep_name = keep_date.isoformat()
+    deleted = []
+    for path in base.iterdir():
+        if not path.is_dir() or path.name == keep_name:
+            continue
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name):
+            continue
+        shutil.rmtree(path)
+        deleted.append(path)
+    return deleted
+
+
 def fetch_prospectus_url(stock_code: str) -> str | None:
     code = _plain_code(stock_code)
     request = Request(urljoin(HKIPOX_URL, f"/stock/{code}"), headers={"User-Agent": "Mozilla/5.0"})

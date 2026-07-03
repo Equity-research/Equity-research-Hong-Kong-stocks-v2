@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from app.ah_premium import load_ah_premium_records
 from app.config import DATA_DIR, DB_PATH
+from app.daily_ipo import load_daily_ipo_records
 from app.sample_data import SAMPLE_IPOS
 from app.scoring import normalize_metrics, score_ipo
 from app.subscription import load_subscription_records
@@ -87,6 +88,32 @@ def initialize() -> None:
 
 def latest_adjustment(db: sqlite3.Connection, ipo_id: int):
     return db.execute("SELECT * FROM adjustments WHERE ipo_id=? ORDER BY id DESC LIMIT 1", (ipo_id,)).fetchone()
+
+
+def apply_daily_ipo_records(record_date) -> None:
+    records = {record.normalized_code: record for record in load_daily_ipo_records(record_date)}
+    with connect() as db:
+        rows = db.execute("SELECT id, code, metrics_json FROM ipos").fetchall()
+        for row in rows:
+            record = records.get(row["code"])
+            if record is None:
+                continue
+            metrics = json.loads(row["metrics_json"])
+            metrics["daily_ipo_record_date"] = record.record_date.isoformat()
+            metrics["expected_listing_date"] = (
+                record.expected_listing_date.isoformat()
+                if record.expected_listing_date is not None
+                else None
+            )
+            metrics["daily_ipo_source"] = record.data_source
+            metrics["daily_ipo_source_url"] = record.source_url
+            metrics = normalize_metrics(metrics)
+            dimensions, score = score_ipo(metrics)
+            db.execute("""UPDATE ipos
+                SET deadline=?, metrics_json=?, dimensions_json=?, original_score=?
+                WHERE id=?""",
+                (record.subscription_end_date.isoformat(), json.dumps(metrics, ensure_ascii=False),
+                 json.dumps([item.model_dump() for item in dimensions], ensure_ascii=False), score, row["id"]))
 
 
 def apply_ah_premiums(record_date) -> None:
