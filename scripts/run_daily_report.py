@@ -230,7 +230,8 @@ def ensure_ah_premium_file(report_date: date) -> Path:
     if records and all(record.ah_premium is not None for record in records):
         return write_ah_premium_records(report_date, records)
 
-    latest = latest_ah_premium_before(report_date)
+    same_day = DATA_DIR / f"ah_premium_{report_date.isoformat()}.csv"
+    latest = same_day if same_day.exists() else latest_ah_premium_before(report_date)
     if latest is not None:
         fallback_records = []
         with latest.open(encoding="utf-8-sig", newline="") as handle:
