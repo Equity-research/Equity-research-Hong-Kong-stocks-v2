@@ -9,14 +9,16 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from app.database import connect
+from app.ah_premium import ah_premium_path
+from app.database import apply_ah_premiums, apply_subscription_multiples, connect
 from app.daily_ipo import active_subscription_codes
 from app.repository import list_ipos
+from app.subscription import subscription_path
 
 
-def _markdown(report_date: date, version: int, items: list[dict]) -> str:
+def _markdown(report_date: date, items: list[dict]) -> str:
     counts = {label: sum(i["recommendation"] == label for i in items) for label in ("申购", "观望", "回避")}
-    lines = [f"# 港股 IPO 分析日报（{report_date}，v{version}）", "", "> 本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", "",
+    lines = [f"# 港股 IPO 分析日报（{report_date}）", "", "> 本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", "",
              f"共 {len(items)} 个项目：申购 {counts['申购']}，观望 {counts['观望']}，回避 {counts['回避']}。", "",
              "| 公司 | 代码 | 行业 | 招股价(HKD) | 原始分 | 调整 | 最终分 | 建议 |",
              "|---|---|---|---:|---:|---:|---:|---|"]
@@ -28,12 +30,17 @@ def _markdown(report_date: date, version: int, items: list[dict]) -> str:
 
 def create_report(report_date: date | None = None) -> dict:
     report_date = report_date or date.today()
+    if subscription_path(report_date).exists():
+        apply_subscription_multiples(report_date)
+    if ah_premium_path(report_date).exists():
+        apply_ah_premiums(report_date)
     active_codes = active_subscription_codes(report_date)
     items = list_ipos(page_size=100, active_codes=active_codes)["items"]
     with connect() as db:
-        version = db.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM reports WHERE report_date=?", (report_date.isoformat(),)).fetchone()[0]
-        markdown = _markdown(report_date, version, items)
+        version = 1
+        markdown = _markdown(report_date, items)
         counts = {label: sum(i["recommendation"] == label for i in items) for label in ("申购", "观望", "回避")}
+        db.execute("DELETE FROM reports")
         cursor = db.execute("""INSERT INTO reports
             (report_date, version, created_at, markdown, item_count, buy_count, hold_count, avoid_count)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -45,7 +52,7 @@ def create_report(report_date: date | None = None) -> dict:
 
 def list_reports() -> list[dict]:
     with connect() as db:
-        return [dict(row) for row in db.execute("SELECT * FROM reports ORDER BY report_date DESC, version DESC").fetchall()]
+        return [dict(row) for row in db.execute("SELECT * FROM reports ORDER BY created_at DESC LIMIT 1").fetchall()]
 
 
 def get_report(report_id: int):
@@ -74,7 +81,7 @@ def report_pdf(report: dict) -> bytes:
     styles = getSampleStyleSheet()
     title = ParagraphStyle("CJKTitle", parent=styles["Title"], fontName=font, fontSize=19, leading=25, textColor=colors.HexColor("#0B1739"))
     body = ParagraphStyle("CJKBody", parent=styles["BodyText"], fontName=font, fontSize=9, leading=14)
-    story = [Paragraph(f"港股 IPO 分析日报", title), Paragraph(f"{report['report_date']} · 版本 {report['version']}", body), Spacer(1, 6*mm),
+    story = [Paragraph(f"港股 IPO 分析日报", title), Paragraph(f"{report['report_date']} · 当前报告", body), Spacer(1, 6*mm),
              Paragraph("本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", body), Spacer(1, 5*mm)]
     data = [["公司", "代码", "行业", "原始分", "调整", "最终分", "建议"]]
     data += _markdown_table_rows(report["markdown"])

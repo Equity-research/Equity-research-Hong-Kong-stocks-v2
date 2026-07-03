@@ -78,7 +78,7 @@ def download_report(report_id: int, format: str = Query(pattern="^(md|pdf)$")):
     report = get_report(report_id)
     if not report:
         raise HTTPException(404, "日报不存在")
-    filename = f"hk-ipo-{report['report_date']}-v{report['version']}"
+    filename = "hk-ipo-analysis"
     if format == "md":
         return Response(report["markdown"].encode("utf-8"), media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{filename}.md"'})

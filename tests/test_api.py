@@ -55,8 +55,12 @@ def test_api_flow(tmp_path, monkeypatch):
         assert saved.status_code == 201
         first = client.post("/api/reports?report_date=2026-07-02").json()
         second = client.post("/api/reports?report_date=2026-07-02").json()
-        assert second["version"] == first["version"] + 1
-        assert client.get(f"/api/reports/{first['id']}/download?format=md").status_code == 200
-        pdf = client.get(f"/api/reports/{first['id']}/download?format=pdf")
+        reports = client.get("/api/reports").json()
+        assert second["version"] == 1
+        assert len(reports) == 1
+        assert reports[0]["id"] == second["id"]
+        assert first["created_at"] <= second["created_at"]
+        assert client.get(f"/api/reports/{second['id']}/download?format=md").status_code == 200
+        pdf = client.get(f"/api/reports/{second['id']}/download?format=pdf")
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
