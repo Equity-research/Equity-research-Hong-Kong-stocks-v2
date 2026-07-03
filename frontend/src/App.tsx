@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BarChart3, BookOpen, CalendarDays, ChevronDown, Download, FileText, Menu, RefreshCw, Save, SlidersHorizontal, X } from 'lucide-react'
+import { BarChart3, BookOpen, CalendarDays, Download, FileText, Menu, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
 import { api } from './api'
 import type { IPODetail, IPO, Report, ReportInsights } from './types'
 
@@ -89,24 +89,13 @@ function IssuanceProfile({ detail }: { detail: IPODetail }) {
   </>
 }
 
-function DetailPanel({ detail, onClose, onSaved }: { detail: IPODetail | null; onClose:()=>void; onSaved:()=>void }) {
-  const [value, setValue] = useState(0); const [reason, setReason] = useState(''); const [message, setMessage] = useState(''); const [saving, setSaving] = useState(false)
-  useEffect(() => { if (detail) { setValue(detail.adjustment); setReason(''); setMessage('') } }, [detail?.id])
+function DetailPanel({ detail, onClose }: { detail: IPODetail | null; onClose:()=>void }) {
   if (!detail) return null
-  const save = async () => {
-    if (reason.trim().length < 10) { setMessage('调整原因至少需要 10 个字符'); return }
-    setSaving(true); setMessage('')
-    try { await api.adjust(detail.id, value, reason); setMessage('调整已保存'); onSaved() } catch (e) { setMessage(e instanceof Error ? e.message : '保存失败') } finally { setSaving(false) }
-  }
   return <aside className="detail-panel" aria-label="IPO详情">
     <div className="detail-head"><div><h2>{detail.name}</h2><span>{detail.code}</span><RecommendationBadge value={detail.recommendation}/></div><button aria-label="关闭详情" onClick={onClose}><X/></button></div>
     <p className="meta">招股价　{detail.price_low.toFixed(2)}–{detail.price_high.toFixed(2)} HKD　　截止 {detail.deadline}</p>
     <IssuanceProfile detail={detail}/>
     <section><h3>风险提示</h3><ul className="risks">{detail.risks.map(r => <li key={r}>{r}</li>)}</ul></section>
-    <section className="adjust"><h3>手动调整 <small>（−1 至 +1）</small></h3><div className="range-row"><span>−1</span><input aria-label="手动调整" type="range" min="-1" max="1" step="1" value={value} onChange={e => setValue(Number(e.target.value))}/><span>+1</span><output>{value > 0 ? '+' : ''}{value}</output></div>
-      <label>调整原因（必填）<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={200} placeholder="请填写调整原因，至少 10 个字符"/><small>{reason.length} / 200</small></label>
-      <div className="save-row"><button className="primary" disabled={saving} onClick={save}><Save size={17}/>{saving ? '保存中…' : '保存调整'}</button><span className={message.includes('已保存') ? 'success' : 'error'}>{message}</span></div>
-    </section>
   </aside>
 }
 
@@ -123,13 +112,13 @@ function TodayPage({ onReports }: { onReports:()=>void }) {
     <div className="page-title"><div><h1>今日 IPO 分析</h1><p>16 只真实 IPO · 透明评分 · 数据截至 2026-07-02 10:34 CST</p></div><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中…' : '生成今日日报'}</button></div>
     {error && <div className="alert">{error}<button onClick={() => load()}>重试</button></div>}
     {loading ? <div className="loading">正在加载 IPO 数据…</div> : <><Summary items={items} insights={insights}/><FilterBar industry={industry} recommendation={recommendation} onIndustry={setIndustry} onRecommendation={setRecommendation} onReset={() => {setIndustry('');setRecommendation('')}} industries={[...new Set(items.map(i=>i.industry))]}/><IPOTable items={visible} selected={selected} onSelect={openDetail}/><p className="count">共 {visible.length} 条 · 缺失字段统一显示“待补充”</p></>}
-  </div><DetailPanel detail={detail} onClose={() => setDetail(null)} onSaved={async () => { await load(); if (selected) setDetail(await api.getIPO(selected)) }}/></div></main>
+  </div><DetailPanel detail={detail} onClose={() => setDetail(null)} /></div></main>
 }
 
 function IPOPage() {
   const [items, setItems] = useState<IPO[]>([]); const [detail, setDetail] = useState<IPODetail|null>(null)
   useEffect(() => { api.listIPOs('?page_size=100').then(r => setItems(r.items)) }, [])
-  return <main className="simple-page"><div className="section-title"><SlidersHorizontal/><div><h1>IPO 项目</h1><p>查看当日全部项目及其评分结果</p></div></div><IPOTable items={items} selected={detail?.id} onSelect={id => api.getIPO(id).then(setDetail)}/><DetailPanel detail={detail} onClose={()=>setDetail(null)} onSaved={()=> detail && api.getIPO(detail.id).then(setDetail)}/></main>
+  return <main className="simple-page"><div className="section-title"><SlidersHorizontal/><div><h1>IPO 项目</h1><p>查看当日全部项目及其评分结果</p></div></div><IPOTable items={items} selected={detail?.id} onSelect={id => api.getIPO(id).then(setDetail)}/><DetailPanel detail={detail} onClose={()=>setDetail(null)} /></main>
 }
 
 function ReportsPage() {

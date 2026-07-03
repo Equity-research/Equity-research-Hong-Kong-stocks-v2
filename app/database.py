@@ -2,9 +2,11 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
+from app.ah_premium import load_ah_premium_records
 from app.config import DATA_DIR, DB_PATH
 from app.sample_data import SAMPLE_IPOS
-from app.scoring import score_ipo
+from app.scoring import normalize_metrics, score_ipo
+from app.subscription import load_subscription_records
 
 
 @contextmanager
@@ -44,28 +46,92 @@ def initialize() -> None:
         count = db.execute("SELECT COUNT(*) FROM ipos").fetchone()[0]
         if count == 0:
             for item in SAMPLE_IPOS:
-                dimensions, score = score_ipo(item["metrics"])
+                metrics = normalize_metrics(item["metrics"])
+                dimensions, score = score_ipo(metrics)
                 db.execute("""INSERT INTO ipos
                     (name, english_name, code, industry, price_low, price_high, deadline, metrics_json,
                      risks_json, dimensions_json, original_score, is_sample)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (item["name"], item["english_name"], item["code"], item["industry"], item["price_low"],
-                     item["price_high"], item["deadline"], json.dumps(item["metrics"], ensure_ascii=False),
+                     item["price_high"], item["deadline"], json.dumps(metrics, ensure_ascii=False),
                      json.dumps(item["risks"], ensure_ascii=False),
                      json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False), score,
                      int(item.get("is_sample", False))))
         else:
             rows = db.execute("SELECT id, code, is_sample, metrics_json FROM ipos").fetchall()
-            sample_metrics = {item["code"]: item["metrics"] for item in SAMPLE_IPOS}
+            sample_items = {item["code"]: item for item in SAMPLE_IPOS}
             for row in rows:
                 metrics = json.loads(row["metrics_json"])
-                if row["code"] in sample_metrics:
-                    metrics.update(sample_metrics[row["code"]])
+                sample_item = sample_items.get(row["code"])
+                if sample_item:
+                    metrics.update(sample_item["metrics"])
+                metrics = normalize_metrics(metrics)
                 dimensions, score = score_ipo(metrics)
-                db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
-                           (json.dumps(metrics, ensure_ascii=False),
-                            json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False), score, row["id"]))
+                if sample_item:
+                    db.execute("""UPDATE ipos SET
+                        name=?, english_name=?, industry=?, price_low=?, price_high=?, deadline=?,
+                        metrics_json=?, risks_json=?, dimensions_json=?, original_score=?, is_sample=?
+                        WHERE id=?""",
+                        (sample_item["name"], sample_item["english_name"], sample_item["industry"],
+                         sample_item["price_low"], sample_item["price_high"], sample_item["deadline"],
+                         json.dumps(metrics, ensure_ascii=False),
+                         json.dumps(sample_item["risks"], ensure_ascii=False),
+                         json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False),
+                         score, int(sample_item.get("is_sample", False)), row["id"]))
+                else:
+                    db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
+                               (json.dumps(metrics, ensure_ascii=False),
+                                json.dumps([d.model_dump() for d in dimensions], ensure_ascii=False),
+                                score, row["id"]))
 
 
 def latest_adjustment(db: sqlite3.Connection, ipo_id: int):
     return db.execute("SELECT * FROM adjustments WHERE ipo_id=? ORDER BY id DESC LIMIT 1", (ipo_id,)).fetchone()
+
+
+def apply_ah_premiums(record_date) -> None:
+    records = {record.hk_code: record for record in load_ah_premium_records(record_date)
+               if record.ah_premium is not None}
+    if not records:
+        return
+    with connect() as db:
+        rows = db.execute("SELECT id, code, metrics_json FROM ipos").fetchall()
+        for row in rows:
+            record = records.get(row["code"])
+            if record is None:
+                continue
+            metrics = json.loads(row["metrics_json"])
+            metrics["is_ah"] = True
+            metrics["ah_premium"] = record.ah_premium
+            metrics["ah_premium_source"] = record.source
+            metrics["ah_premium_record_date"] = record.record_date.isoformat()
+            metrics["a_ticker"] = record.a_ticker
+            metrics["a_close_cny"] = record.a_close_cny
+            metrics["cny_hkd"] = record.cny_hkd
+            metrics = normalize_metrics(metrics)
+            dimensions, score = score_ipo(metrics)
+            db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
+                       (json.dumps(metrics, ensure_ascii=False),
+                        json.dumps([item.model_dump() for item in dimensions], ensure_ascii=False),
+                        score, row["id"]))
+
+
+def apply_subscription_multiples(record_date) -> None:
+    records = {record.normalized_code: record for record in load_subscription_records(record_date)}
+    with connect() as db:
+        rows = db.execute("SELECT id, code, metrics_json FROM ipos").fetchall()
+        for row in rows:
+            record = records.get(row["code"])
+            if record is None or record.subscription_multiple is None:
+                continue
+            metrics = json.loads(row["metrics_json"])
+            metrics["subscription_multiple"] = record.subscription_multiple
+            metrics["subscription_source"] = record.data_source
+            metrics["subscription_record_date"] = record.record_date.isoformat()
+            metrics["subscription_captured_at"] = record.captured_at
+            metrics = normalize_metrics(metrics)
+            dimensions, score = score_ipo(metrics)
+            db.execute("UPDATE ipos SET metrics_json=?, dimensions_json=?, original_score=? WHERE id=?",
+                       (json.dumps(metrics, ensure_ascii=False),
+                        json.dumps([item.model_dump() for item in dimensions], ensure_ascii=False),
+                        score, row["id"]))

@@ -1,7 +1,89 @@
+import re
 from typing import Any
 
 from app.config import load_rules
 from app.schemas import DimensionScore
+
+
+TRUE_VALUES = {"1", "true", "t", "yes", "y", "有", "是", "设有", "存在"}
+FALSE_VALUES = {"0", "false", "f", "no", "n", "无", "否", "没有", "未设", "不设", "暂无", "不适用", "na", "n/a", "-"}
+
+
+def _to_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return None
+        compact = re.sub(r"[\s　：:，,。.;；（）()]+", "", text)
+        if compact in TRUE_VALUES:
+            return True
+        if compact in FALSE_VALUES:
+            return False
+        if compact.endswith("%"):
+            try:
+                return float(compact.rstrip("%")) > 0
+            except ValueError:
+                pass
+        if compact.startswith(("无", "否", "未", "不设", "没有", "暂无")):
+            return False
+        if compact.startswith(("有", "是", "设有")):
+            return True
+    return None
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value.replace(",", ""))
+        return float(match.group()) if match else None
+    return None
+
+
+def _to_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        if _to_bool(value) is False:
+            return []
+        return [item.strip() for item in re.split(r"[、,，;/；\n]+", value) if item.strip()]
+    return []
+
+
+def normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(metrics)
+    investors = _to_list(normalized.get("cornerstone_investors"))
+    ratio = _to_float(normalized.get("cornerstone_ratio"))
+    normalized["cornerstone_investors"] = investors
+    normalized["cornerstone_ratio"] = ratio
+
+    for key in ("greenshoe", "has_cornerstone", "cornerstone_quality_good", "sponsor_quality_good", "is_ah"):
+        parsed = _to_bool(normalized.get(key))
+        normalized[key] = parsed
+
+    if normalized["greenshoe"] is None:
+        for alias in ("over_allotment_option", "over_allotment", "over_allocation_option"):
+            parsed = _to_bool(normalized.get(alias))
+            if parsed is not None:
+                normalized["greenshoe"] = parsed
+                break
+
+    inferred_cornerstone = bool(investors) or (ratio is not None and ratio > 0)
+    if normalized["has_cornerstone"] is None and inferred_cornerstone:
+        normalized["has_cornerstone"] = True
+    if normalized["has_cornerstone"] is False:
+        normalized["cornerstone_quality_good"] = False
+    return normalized
 
 
 def _band_score(value: float, bands: list[dict[str, float]]) -> float:
@@ -31,6 +113,7 @@ def _boolean_dimension(key: str, rule: dict[str, Any], metrics: dict[str, Any]) 
 
 
 def score_ipo(metrics: dict[str, Any]) -> tuple[list[DimensionScore], float]:
+    metrics = normalize_metrics(metrics)
     rules = load_rules()
     dimensions: list[DimensionScore] = []
     for key, rule in rules["dimensions"].items():

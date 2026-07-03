@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from app.config import load_rules
+from app.daily_ipo import DailyIPODataMissingError
 from app.database import initialize
 from app.repository import list_ipos, get_ipo, add_adjustment
 from app.reporting import create_report, list_reports, get_report, report_pdf
@@ -53,7 +54,10 @@ def scoring_rules():
 
 @app.post("/api/reports", response_model=ReportDetail, status_code=201)
 def generate_report(report_date: date | None = None):
-    return create_report(report_date)
+    try:
+        return create_report(report_date)
+    except DailyIPODataMissingError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/reports", response_model=list[ReportSummary])

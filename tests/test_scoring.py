@@ -1,4 +1,4 @@
-from app.scoring import recommendation, score_ipo
+from app.scoring import normalize_metrics, recommendation, score_ipo
 
 
 def test_dimension_weights_sum_to_10_and_missing_scores_zero():
@@ -32,3 +32,35 @@ def test_subscription_boundaries_and_peer_valuation():
         dimensions, score = score_ipo({**base, "subscription_multiple": multiple})
         assert score == total
         assert next(item for item in dimensions if item.key == "cornerstone_quality").score == 0
+
+
+def test_boolean_metrics_are_normalized_before_scoring():
+    dimensions, score = score_ipo({
+        "has_cornerstone": "否",
+        "cornerstone_quality_good": "是",
+        "greenshoe": "无",
+        "subscription_multiple": 0,
+        "is_ah": False,
+        "peer_valuation_discount": 0,
+        "sponsor_quality_good": "有",
+    })
+
+    by_key = {item.key: item.score for item in dimensions}
+    assert by_key["cornerstone_presence"] == 0
+    assert by_key["cornerstone_quality"] == 0
+    assert by_key["greenshoe"] == 0
+    assert by_key["sponsor"] == 1
+    assert score == 2
+
+
+def test_cornerstone_presence_is_inferred_from_investors_or_ratio():
+    metrics = normalize_metrics({
+        "has_cornerstone": None,
+        "cornerstone_investors": "GIC、富达",
+        "cornerstone_ratio": "",
+        "greenshoe": "15%",
+    })
+
+    assert metrics["has_cornerstone"] is True
+    assert metrics["cornerstone_investors"] == ["GIC", "富达"]
+    assert metrics["greenshoe"] is True

@@ -44,11 +44,14 @@ def _report_insights(items: list[dict]) -> dict:
     return {"fundamental_valuation_ranking": ranking, "allotment_difficulty": difficulty}
 
 
-def list_ipos(industry=None, recommendation_filter=None, deadline=None, sort="final_score", order="desc", page=1, page_size=20):
+def list_ipos(industry=None, recommendation_filter=None, deadline=None, sort="final_score", order="desc", page=1, page_size=20,
+              active_codes: set[str] | None = None):
     with connect() as db:
         rows = db.execute("SELECT * FROM ipos").fetchall()
         items = [_base(row, latest_adjustment(db, row["id"])) for row in rows]
     insights = _report_insights(items)
+    if active_codes is not None:
+        items = [item for item in items if item["code"] in active_codes]
     if industry:
         items = [item for item in items if item["industry"] == industry]
     if recommendation_filter:

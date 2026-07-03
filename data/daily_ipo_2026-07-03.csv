@@ -1,0 +1,10 @@
+record_date,stock_code,company_name,status,subscription_end_date,expected_listing_date,data_source,source_url
+2026-07-03,00537,普源精电,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,01377,鼎泰高科,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,02475,立讯精密,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,02797,齐云山食品,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,03752,珞石机器人,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,06951,三环集团,认购中,2026-07-06,2026-07-09,HKIPOx,https://hkipox.com/
+2026-07-03,02249,晶合集成,认购中,2026-07-07,2026-07-10,HKIPOx,https://hkipox.com/
+2026-07-03,06745,滨化股份,认购中,2026-07-07,2026-07-10,HKIPOx,https://hkipox.com/
+2026-07-03,02523,永康控股,认购中,2026-07-08,2026-07-13,HKIPOx,https://hkipox.com/

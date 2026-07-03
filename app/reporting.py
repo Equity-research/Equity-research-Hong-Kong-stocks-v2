@@ -10,6 +10,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from app.database import connect
+from app.daily_ipo import active_subscription_codes
 from app.repository import list_ipos
 
 
@@ -27,7 +28,8 @@ def _markdown(report_date: date, version: int, items: list[dict]) -> str:
 
 def create_report(report_date: date | None = None) -> dict:
     report_date = report_date or date.today()
-    items = list_ipos(page_size=100)["items"]
+    active_codes = active_subscription_codes(report_date)
+    items = list_ipos(page_size=100, active_codes=active_codes)["items"]
     with connect() as db:
         version = db.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM reports WHERE report_date=?", (report_date.isoformat(),)).fetchone()[0]
         markdown = _markdown(report_date, version, items)
@@ -74,9 +76,8 @@ def report_pdf(report: dict) -> bytes:
     body = ParagraphStyle("CJKBody", parent=styles["BodyText"], fontName=font, fontSize=9, leading=14)
     story = [Paragraph(f"港股 IPO 分析日报", title), Paragraph(f"{report['report_date']} · 版本 {report['version']}", body), Spacer(1, 6*mm),
              Paragraph("本报告使用本地招股书及结构化资料，仅供研究，不构成任何投资建议。", body), Spacer(1, 5*mm)]
-    items = list_ipos(page_size=100)["items"]
     data = [["公司", "代码", "行业", "原始分", "调整", "最终分", "建议"]]
-    data += [[i["name"], i["code"], i["industry"], f"{i['original_score']:.1f}", f"{i['adjustment']:+.1f}", f"{i['final_score']:.1f}", i["recommendation"]] for i in items]
+    data += _markdown_table_rows(report["markdown"])
     table = Table(data, colWidths=[47*mm, 23*mm, 29*mm, 18*mm, 17*mm, 18*mm, 17*mm], repeatRows=1)
     table.setStyle(TableStyle([("FONTNAME", (0,0), (-1,-1), font), ("FONTSIZE", (0,0), (-1,-1), 8),
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0B1739")), ("TEXTCOLOR", (0,0), (-1,0), colors.white),
@@ -87,3 +88,16 @@ def report_pdf(report: dict) -> bytes:
               Spacer(1, 2*mm), Paragraph("招股期认购倍数仍可能变化。IPO 投资存在价格波动、流动性及信息不完整风险。", body)]
     doc.build(story)
     return buffer.getvalue()
+
+
+def _markdown_table_rows(markdown: str) -> list[list[str]]:
+    rows = []
+    for line in markdown.splitlines():
+        if not line.startswith("| ") or line.startswith("|---") or line.startswith("| 公司 "):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 8:
+            continue
+        name, code, industry, _price, original_score, adjustment, final_score, recommendation = cells
+        rows.append([name, code, industry, original_score, adjustment, final_score, recommendation])
+    return rows
