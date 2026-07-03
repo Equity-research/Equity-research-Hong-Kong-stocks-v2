@@ -20,8 +20,8 @@ from app.ah_premium import (
 )
 from app.config import DATA_DIR, ROOT
 from app.daily_ipo import active_subscription_codes, daily_ipo_path
-from app.database import apply_ah_premiums, apply_subscription_multiples, initialize
-from app.prospectus import sync_prospectuses_for_date
+from app.database import apply_ah_premiums, apply_daily_ipo_records, apply_subscription_multiples, initialize
+from app.prospectus import prune_prospectus_dirs, sync_prospectuses_for_date
 from app.reporting import create_report, report_pdf
 from app.repository import get_ipo, list_ipos
 from app.subscription import (
@@ -47,7 +47,7 @@ def main() -> None:
     args = parser.parse_args()
     report_date = date.fromisoformat(args.date)
 
-    progress = Progress(total=10, wait_seconds=max(args.wait, 0))
+    progress = Progress(total=11, wait_seconds=max(args.wait, 0))
     progress.info(f"开始跑全量数据，日期={report_date.isoformat()}")
 
     with progress.step("抓取 HKIPOx 今日申购表，生成 IPO 清单和申购倍数"):
@@ -55,9 +55,13 @@ def main() -> None:
 
     with progress.step("同步当日招股书 PDF"):
         prospectus_result = sync_prospectuses_for_date(report_date)
+        deleted_prospectus_dirs = prune_prospectus_dirs(report_date)
 
     with progress.step("初始化 SQLite 数据库和基础评分数据"):
         initialize()
+
+    with progress.step("同步当日 IPO 截止日到数据库"):
+        apply_daily_ipo_records(report_date)
 
     with progress.step("写入申购倍数到数据库"):
         apply_subscription_multiples(report_date)
@@ -99,7 +103,8 @@ def main() -> None:
         f"kept={len(prospectus_result.kept)} "
         f"reused={len(prospectus_result.reused)} "
         f"downloaded={len(prospectus_result.downloaded)} "
-        f"deleted={len(prospectus_result.deleted)}"
+        f"deleted={len(prospectus_result.deleted)} "
+        f"deleted_old_dirs={len(deleted_prospectus_dirs)}"
     )
     print(f"ah_premium={ah_path}")
     print(f"markdown={md_path}")
