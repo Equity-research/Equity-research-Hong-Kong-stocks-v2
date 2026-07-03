@@ -93,6 +93,70 @@ function formatTimestamp(report: Report | null) {
   return `${report.report_date} ${createdAt.slice(11)}`
 }
 
+const percentText = (value: number | null) => value == null ? '待补充' : `${value.toFixed(1)}%`
+
+const REASON_GROUPS = [
+  {
+    key: 'three-circle',
+    codes: ['06951'],
+    points: (items: LatestIPO[]) => [
+      '电子陶瓷材料和元器件龙头，基本面扎实。',
+      '2025年收入约89亿元、净利约26亿元，2026Q1继续高增。',
+      '基石阵容很强：淡马锡、JPM、CPE、腾讯、阿里、GSAM、泰康、工银、TCL。',
+      '保荐人中国银河上一单赛力斯表现一般，是扣分项。',
+      `当前A/H溢价约${percentText(items[0]?.ahPremium ?? null)}，估值不便宜但结合稀缺性仍可接受，需控制仓位。`,
+    ],
+  },
+  {
+    key: 'rigol',
+    codes: ['00537'],
+    points: (items: LatestIPO[]) => [
+      '电子测量仪器赛道稀缺，毛利率较高，2025年收入和利润仍有增长。',
+      '基石占比约42%，HHLR、CPE、阳光电源等组合质量不错。',
+      `当前A/H溢价约${percentText(items[0]?.ahPremium ?? null)}，估值不便宜但结合稀缺性仍可接受，适合申购但不宜重仓。`,
+    ],
+  },
+  {
+    key: 'dtech',
+    codes: ['01377'],
+    points: (items: LatestIPO[]) => [
+      'PCB钻针份额领先，收入增速和盈利质量不错。',
+      '价格绝对值和最低一手金额都高，资金占用最大。',
+      `A/H溢价约${percentText(items[0]?.ahPremium ?? null)}，仍需结合PCB周期和上市初期承接观察。`,
+    ],
+  },
+  {
+    key: 'befar-nexchip',
+    codes: ['06745', '02249'],
+    points: (items: LatestIPO[]) => {
+      const befar = items.find(item => item.code === '06745')
+      const nexchip = items.find(item => item.code === '02249')
+      return [
+        `两只都有基石支撑，但公开认购偏冷，滨化A/H溢价约${percentText(befar?.ahPremium ?? null)}、晶合集成约${percentText(nexchip?.ahPremium ?? null)}。`,
+        '滨化受化工周期影响，晶合集成重资产属性强，估值要结合周期位置看。',
+        '更适合作为低热度博弈票，而不是优先申购票。',
+      ]
+    },
+  },
+  {
+    key: 'watch-group',
+    codes: ['03752', '02797', '02475'],
+    points: () => [
+      '珞石和齐云山认购热度不低，但盈利、规模或估值证据不够扎实。',
+      '立讯基本面强，但融资体量大且公开认购偏冷，中签容易不等于上市表现好。',
+      '这组更适合等暗盘和资金热度确认。',
+    ],
+  },
+  {
+    key: 'ekh',
+    codes: ['02523'],
+    points: () => [
+      '规则分最低，业务稀缺性和成长性证据不足。',
+      '小市值物流资产上市后流动性不确定，暂不纳入优先申购。',
+    ],
+  },
+]
+
 function Insights({ data, onOpen }: { data: LatestIPO[]; onOpen: (item: LatestIPO) => void }) {
   const investable = data.filter(item => item.tier !== '回避')
   const ranking = [...investable].sort((a, b) => (b.total - a.total) || ((b.sub ?? 0) - (a.sub ?? 0)))
@@ -105,7 +169,11 @@ function Insights({ data, onOpen }: { data: LatestIPO[]; onOpen: (item: LatestIP
     ...band,
     companies: data.filter(item => item.sub != null && item.sub >= band.min && item.sub < band.max).map(item => item.name),
   })).filter(group => group.companies.length)
-  const reasons = ranking.slice(0, 5)
+  const byCode = new Map(data.map(item => [item.code, item]))
+  const reasons = REASON_GROUPS.map(group => ({
+    ...group,
+    items: group.codes.map(code => byCode.get(code)).filter((item): item is LatestIPO => Boolean(item)),
+  })).filter(group => group.items.length)
 
   return <section className="summary-card">
     <div className="stats">
@@ -116,13 +184,9 @@ function Insights({ data, onOpen }: { data: LatestIPO[]; onOpen: (item: LatestIP
     </div>
     <div className="insights">
       <section className="decision-reasons"><h3>1）申购/不申购原因</h3><div className="reason-list">
-        {reasons.map(item => <article key={item.code}>
-          <b><button className="reason-link" type="button" onClick={() => onOpen(item)}>{item.name}</button><span className={tierClass(item.tier)}>{item.tier}</span></b>
-          <ul>
-            <li>{item.summary}</li>
-            {item.quality.slice(0, 2).map(point => <li key={point}>{point}</li>)}
-            {item.risks.slice(0, 1).map(point => <li key={point}>{point}</li>)}
-          </ul>
+        {reasons.map(group => <article key={group.key}>
+          <b>{group.items.map((item, index) => <span className="reason-name" key={item.code}>{index > 0 && <span className="reason-separator">/</span>}<button className="reason-link" type="button" onClick={() => onOpen(item)}>{item.name}</button></span>)}<span className={tierClass(group.items[0].tier)}>{group.items[0].tier}</span></b>
+          <ul>{group.points(group.items).map(point => <li key={point}>{point}</li>)}</ul>
         </article>)}
       </div></section>
       <section><h3>2）按优先级排序</h3><p>{ranking.map(item => item.name).join(' > ') || '暂无项目'}</p></section>
