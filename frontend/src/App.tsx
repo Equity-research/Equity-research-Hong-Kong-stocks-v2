@@ -232,7 +232,7 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
 function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentiment | null; loading: boolean; error: string; onRefresh: () => void }) {
   const maxWordCount = Math.max(1, ...(data?.hot_words.map(word => word.count) ?? [1]))
   return <section className="cn-market">
-    <div className="page-title"><div><h1>A股市场情绪图</h1><p>按当日平均股价、涨跌家数和评论热词综合估算 · 数据会自动保存到本地 data 目录</p></div><div className="refresh-panel"><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button><small>数据抓取时间：{formatDateTime(data?.generated_at)}</small></div></div>
+    <div className="page-title"><div><h1>A股市场情绪图</h1></div><div className="refresh-panel"><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button><small>数据抓取时间：{formatDateTime(data?.generated_at)}</small></div></div>
     {error && <div className="alert">{error}</div>}
     {loading && <div className="empty">正在读取 A股行情、热词和板块数据...</div>}
     {!loading && data && <>
