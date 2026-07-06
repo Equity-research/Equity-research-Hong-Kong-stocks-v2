@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, useEffect, useMemo, useState } from 'react'
 import { FileText, RefreshCw, X } from 'lucide-react'
 import { api } from './api'
 import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, Report } from './types'
@@ -323,6 +323,7 @@ export default function App() {
   const [selected, setSelected] = useState<LatestIPO | null>(null)
   const [generating, setGenerating] = useState(false)
   const [refreshingData, setRefreshingData] = useState(false)
+  const [refreshProgress, setRefreshProgress] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [report, setReport] = useState<Report | null>(null)
@@ -407,13 +408,16 @@ export default function App() {
 
   const refreshData = async () => {
     setRefreshingData(true)
+    setRefreshProgress(0)
     setError('')
     try {
       const job = await api.startDataRefresh()
       for (;;) {
         await new Promise(resolve => setTimeout(resolve, 2000))
         const status = await api.dataRefreshStatus(job.job_id)
+        setRefreshProgress(status.progress_percent ?? 0)
         if (status.status === 'succeeded') {
+          setRefreshProgress(100)
           window.location.reload()
           return
         }
@@ -424,6 +428,7 @@ export default function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '刷新数据失败')
       setRefreshingData(false)
+      setRefreshProgress(0)
     }
   }
 
@@ -442,7 +447,7 @@ export default function App() {
       >{tab.label}</button>)}
     </div>
     {market === 'hk' ? <>
-      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><div className="title-actions"><button className="secondary" onClick={refreshData} disabled={refreshingData}><RefreshCw size={16}/>{refreshingData ? '刷新中...' : '刷新数据'}</button><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div></div>
+      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><div className="title-actions"><button className={refreshingData ? 'secondary progress-button running' : 'secondary progress-button'} style={{ '--progress': `${refreshProgress}%` } as CSSProperties} onClick={refreshData} disabled={refreshingData}><RefreshCw size={16}/>{refreshingData ? `刷新中 ${refreshProgress}%` : '刷新数据'}</button><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div></div>
       {error && <div className="alert">{error}</div>}
       {loading && <div className="empty">正在加载最新数据...</div>}
       {!loading && !error && <>

@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import re
 import subprocess
 import sys
 from threading import Lock, Thread
@@ -22,6 +23,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 refresh_jobs: dict[str, dict] = {}
 refresh_lock = Lock()
+REFRESH_PROGRESS_PATTERN = re.compile(r"\[(\d+)/(\d+)\]\s*(开始|完成|失败)：(.+?)(?:（|$)")
 
 
 @app.on_event("startup")
@@ -80,6 +82,10 @@ def start_data_refresh(report_date: date | None = None):
         "finished_at": None,
         "report_date": target_date,
         "detail": None,
+        "progress_current": 0,
+        "progress_total": 11,
+        "progress_percent": 0,
+        "progress_label": "等待开始",
     }
     with refresh_lock:
         refresh_jobs[job_id] = job
@@ -105,10 +111,25 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
         "--wait",
         "0",
     ]
+    output_lines: list[str] = []
     try:
-        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=900, check=False)
-        detail = (result.stdout + "\n" + result.stderr).strip()[-4000:] or None
-        status = "succeeded" if result.returncode == 0 else "failed"
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        if process.stdout is None:
+            raise RuntimeError("刷新任务未返回进度输出")
+        for raw_line in process.stdout:
+            line = raw_line.rstrip()
+            output_lines.append(line)
+            update_refresh_progress(job_id, line, "\n".join(output_lines)[-4000:])
+        return_code = process.wait()
+        detail = "\n".join(output_lines).strip()[-4000:] or None
+        status = "succeeded" if return_code == 0 else "failed"
     except Exception as exc:
         detail = str(exc)
         status = "failed"
@@ -117,6 +138,30 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
         job["status"] = status
         job["finished_at"] = datetime.now()
         job["detail"] = detail
+        if status == "succeeded":
+            job["progress_current"] = job.get("progress_total", 11)
+            job["progress_percent"] = 100
+            job["progress_label"] = "全部完成"
+
+
+def update_refresh_progress(job_id: str, line: str, detail: str | None) -> None:
+    match = REFRESH_PROGRESS_PATTERN.search(line)
+    with refresh_lock:
+        job = refresh_jobs.get(job_id)
+        if not job:
+            return
+        job["detail"] = detail
+        if not match:
+            return
+        step = int(match.group(1))
+        total = int(match.group(2))
+        phase = match.group(3)
+        label = match.group(4).strip()
+        completed = step if phase == "完成" else max(step - 1, 0)
+        job["progress_current"] = completed
+        job["progress_total"] = total
+        job["progress_percent"] = round(completed / total * 100)
+        job["progress_label"] = f"{phase}：{label}"
 
 
 @app.get("/api/a-shares/sentiment", response_model=AShareSentiment)

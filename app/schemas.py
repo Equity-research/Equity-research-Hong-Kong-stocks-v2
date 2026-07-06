@@ -114,6 +114,10 @@ class DataRefreshStatus(BaseModel):
     finished_at: datetime | None = None
     report_date: date
     detail: str | None = None
+    progress_current: int = 0
+    progress_total: int = 0
+    progress_percent: int = 0
+    progress_label: str | None = None
 
 
 class AShareHotWord(BaseModel):
