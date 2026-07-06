@@ -1,0 +1,7 @@
+record_date,hk_code,company_name,a_ticker,h_offer_price_hkd,a_close_cny,cny_hkd,ah_premium,source,notes
+2026-07-06,00537.HK,普源精电,688337.SS,45.98,62.85,1.1548,57.8,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-06,02475.HK,立讯精密,002475.SZ,63.28,63.14,1.1548,15.2,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-06,06951.HK,三环集团,300408.SZ,100.3,144.1,1.1548,65.9,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-06,01377.HK,鼎泰高科,301377.SZ,380.0,501.79,1.1548,52.5,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-06,02249.HK,晶合集成,688249.SS,32.3,62.55,1.1548,123.6,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-06,06745.HK,滨化股份,601678.SS,3.59,6.24,1.1548,100.7,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较

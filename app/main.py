@@ -15,7 +15,8 @@ from app.daily_ipo import DailyIPODataMissingError, active_subscription_codes
 from app.database import initialize
 from app.repository import list_ipos, get_ipo, add_adjustment
 from app.reporting import create_report, list_reports, get_report, report_pdf
-from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus
+from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, USMarketDashboard
+from app.us_market import build_us_market_dashboard
 
 app = FastAPI(title="港股 IPO 分析 API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -172,6 +173,11 @@ def a_share_sentiment(record_date: date | None = None, refresh: bool = False):
 @app.get("/api/a-shares/sentiment/history", response_model=list[AShareSentimentHistoryPoint])
 def a_share_sentiment_history(limit: int = Query(15, ge=1, le=60)):
     return latest_sentiment_history(limit)
+
+
+@app.get("/api/us-market/dashboard", response_model=USMarketDashboard)
+def us_market_dashboard(record_date: date | None = None, refresh: bool = False):
+    return build_us_market_dashboard(record_date, refresh)
 
 
 @app.post("/api/reports", response_model=ReportDetail, status_code=201)

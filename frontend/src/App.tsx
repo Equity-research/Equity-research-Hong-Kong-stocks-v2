@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useMemo, useState } from 'react'
-import { FileText, RefreshCw, X } from 'lucide-react'
+import { Archive, FileText, RefreshCw, X } from 'lucide-react'
 import { api } from './api'
-import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, Report } from './types'
+import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, Report, USMarketDashboard, USMarketNewsItem } from './types'
 
 type Tier = '申购' | '观望' | '回避'
 type Market = 'hk' | 'us' | 'cn'
@@ -47,6 +47,11 @@ const numberText = (value: number | null, suffix = '') => value == null ? '待�
 const tierClass = (tier: Tier) => tier === '申购' ? 'buy' : tier === '观望' ? 'hold' : 'avoid'
 const shortDate = (value: string) => value.slice(5)
 const priceText = (low: number, high: number) => low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
+const localISODate = () => {
+  const now = new Date()
+  const offsetMs = now.getTimezoneOffset() * 60 * 1000
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10)
+}
 const cnyAmount = (value: number) => {
   const abs = Math.abs(value)
   const sign = value < 0 ? '-' : ''
@@ -195,6 +200,36 @@ function IPOCard({ item, onOpen }: { item: LatestIPO; onOpen: (item: LatestIPO) 
   </button>
 }
 
+function IPOHistoryModal({ items, referenceDate, onOpen, onClose }: { items: LatestIPO[]; referenceDate: string; onOpen: (item: LatestIPO) => void; onClose: () => void }) {
+  const grouped = [...items]
+    .sort((a, b) => b.end.localeCompare(a.end) || (b.total - a.total))
+    .reduce<Array<{ date: string; items: LatestIPO[] }>>((groups, item) => {
+      const group = groups.find(entry => entry.date === item.end)
+      if (group) group.items.push(item)
+      else groups.push({ date: item.end, items: [item] })
+      return groups
+    }, [])
+
+  return <>
+    <div className="history-backdrop open" onClick={onClose} />
+    <section className="history-modal ipo-history-modal" aria-label="IPO 历史记录">
+      <button className="close" aria-label="关闭历史记录" onClick={onClose}><X size={22} /></button>
+      <h2>历史记录</h2>
+      <p>已收起截止日期早于 {referenceDate} 的分析记录，共 {items.length} 只。</p>
+      {items.length ? <div className="ipo-history-list">
+        {grouped.map(group => <details className="ipo-history-group" key={group.date}>
+          <summary><span>{shortDate(group.date)} 截止</span><b>{group.items.length} 只</b></summary>
+          <div>{group.items.map(item => <button className="ipo-history-item" key={item.code} type="button" onClick={() => onOpen(item)}>
+            <span><strong>{item.name}</strong><small>{item.code}.HK · {item.industry}</small></span>
+            <b className={tierClass(item.tier)}>{item.tier}</b>
+            <em>{item.total.toFixed(0)}分</em>
+          </button>)}</div>
+        </details>)}
+      </div> : <div className="empty">暂无过期 IPO 记录</div>}
+    </section>
+  </>
+}
+
 function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () => void }) {
   return <>
     <div className={item ? 'backdrop open' : 'backdrop'} onClick={onClose} />
@@ -263,8 +298,120 @@ function SentimentHistoryModal({ points, loading, error, onClose }: { points: AS
   </>
 }
 
+function NewsDetailModal({ item, onClose }: { item: USMarketNewsItem; onClose: () => void }) {
+  const summary = (item.article_summary_zh || '暂未提取到可用中文摘要。').replace(/^链接页摘要：/, '').replace(/^文章总结：/, '')
+  const body = (item.article_body_zh || '链接页正文暂未提取到可用中文译文。').replace(/^中文编译：/, '')
+  const originalBody = item.original_body?.trim()
+  return <>
+    <div className="history-backdrop open" onClick={onClose} />
+    <section className="history-modal news-detail-modal" aria-label="美股新闻详情">
+      <button className="close" aria-label="关闭新闻详情" onClick={onClose}><X size={22} /></button>
+      <h2>{item.article_title_zh || item.title_zh || item.title || '美股新闻动态'}</h2>
+      <p>{item.source_zh || '海外媒体'}{item.published_at ? ` · ${item.published_at}` : ''}</p>
+      <article>
+        <strong>{item.title_zh || item.article_title_zh || item.title || '美股新闻动态'}</strong>
+        <section>
+          <h3>文章总结</h3>
+          <p>{summary}</p>
+        </section>
+        <section>
+          <h3>译文正文</h3>
+          <p>{body}</p>
+        </section>
+        <section>
+          <h3>已保存原文</h3>
+          {originalBody ? <>
+            {item.original_title && <b className="original-title">{item.original_title}</b>}
+            <p className="original-body">{originalBody}</p>
+            {item.original_saved_at && <small>保存时间：{formatDateTime(item.original_saved_at)}</small>}
+          </> : <p>暂未抓取到原文正文，请刷新数据后重试。</p>}
+        </section>
+      </article>
+    </section>
+  </>
+}
+
+function NewsLink({ item, onOpen }: { item: USMarketNewsItem; onOpen: (item: USMarketNewsItem) => void }) {
+  return <button className="news-button" type="button" onClick={() => onOpen(item)}>
+    <span>{item.title_zh || item.article_title_zh || item.title || '美股新闻动态'}</span>
+    <small>{item.source_zh || '海外媒体'}</small>
+    {item.article_summary_zh && <em>{item.article_summary_zh}</em>}
+  </button>
+}
+
+function QQQDailyKLine({ history }: { history: NonNullable<USMarketDashboard['qqq']>['history'] }) {
+  const width = 320
+  const height = 128
+  const padding = 12
+  const values = history.flatMap(item => [item.high, item.low, item.open, item.close].filter((value): value is number => value != null))
+  const maxValue = Math.max(...values, 1)
+  const minValue = Math.min(...values, maxValue)
+  const range = Math.max(maxValue - minValue, 1)
+  const step = history.length ? (width - padding * 2) / history.length : 0
+  const y = (value: number | null) => value == null ? height - padding : padding + (maxValue - value) / range * (height - padding * 2)
+  return <div className="qqq-kline" aria-label="纳指100ETF日K线">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img">
+      {history.map((item, index) => {
+        const open = item.open ?? item.close
+        const close = item.close ?? item.open
+        const high = item.high ?? Math.max(open ?? 0, close ?? 0)
+        const low = item.low ?? Math.min(open ?? 0, close ?? 0)
+        const x = padding + step * index + step / 2
+        const candleWidth = Math.max(6, Math.min(12, step * 0.48))
+        const top = Math.min(y(open), y(close))
+        const bodyHeight = Math.max(Math.abs(y(open) - y(close)), 2)
+        const up = close != null && open != null && close >= open
+        return <g key={item.date ?? index} className={up ? 'up' : 'down'}>
+          <title>{`${item.date ?? ''} 开 ${open ?? '-'} 高 ${high ?? '-'} 低 ${low ?? '-'} 收 ${close ?? '-'}`}</title>
+          <line x1={x} x2={x} y1={y(high)} y2={y(low)} />
+          <rect x={x - candleWidth / 2} y={top} width={candleWidth} height={bodyHeight} rx={1.5} />
+        </g>
+      })}
+    </svg>
+    <span>日 K 线</span>
+  </div>
+}
+
+function USMarketDashboardView({ data, loading, error, onRefresh }: { data: USMarketDashboard | null; loading: boolean; error: string; onRefresh: () => void }) {
+  const trendClass = (trend: string) => trend === '偏强' ? 'positive' : trend === '承压' ? 'negative' : 'neutral'
+  const changeClass = (value: number | null) => value == null ? 'neutral' : value >= 0 ? 'positive' : 'negative'
+  const history = data?.qqq.history ?? []
+  const [selectedNews, setSelectedNews] = useState<USMarketNewsItem | null>(null)
+  return <section className="us-market">
+    <div className="page-title"><div><h1>美股行业动态</h1><p>半导体 / 光模块 / 内存芯片 / 航天 / 机器人 / 美元 / 黄金 · 纳指100ETF 动态跟踪</p></div><div className="refresh-panel"><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '抓取中...' : '刷新数据'}</button><small>数据抓取时间：{formatDateTime(data?.generated_at)}</small></div></div>
+    {error && <div className="alert">{error}</div>}
+    {loading && !data && <div className="empty">正在抓取美股新闻、链接页摘要与纳指100ETF行情...</div>}
+    {data && <>
+      <section className="us-highlights">
+        {data.highlights.map(text => <strong key={text}>{text}</strong>)}
+      </section>
+      <div className="us-layout">
+        <section className="us-modules">
+          {data.modules.map(module => <article className="us-module" key={module.key}>
+            <div className="us-module-head"><div><h3>{module.name}</h3><span>{module.focus}</span></div><b className={trendClass(module.trend)}>{module.trend}</b></div>
+            <p className="analysis-highlight">{module.analysis}</p>
+            <ul>{module.news.length ? module.news.map(item => <li key={item.url || item.title}><NewsLink item={item} onOpen={setSelectedNews} /></li>) : <li><span>暂无可用新闻，等待下一次刷新。</span></li>}</ul>
+          </article>)}
+        </section>
+        <aside className="qqq-panel">
+          <div className="qqq-head"><div><span>纳指100ETF（QQQ）</span><strong>{data.qqq.price == null ? '待获取' : data.qqq.price.toFixed(2)}</strong></div><b className={changeClass(data.qqq.change_pct)}>{data.qqq.change_pct == null ? '待获取' : `${data.qqq.change_pct.toFixed(2)}%`}</b></div>
+          <p className="analysis-highlight">{data.qqq.analysis}</p>
+          <QQQDailyKLine history={history} />
+          <div className="qqq-news">
+            <h3>纳指100ETF 新闻动态</h3>
+            {data.qqq.news.map(item => <NewsLink key={item.url || item.title} item={item} onOpen={setSelectedNews} />)}
+            {!data.qqq.news.length && <p>暂无可用新闻，等待下一次刷新。</p>}
+          </div>
+        </aside>
+      </div>
+    </>}
+    {selectedNews && <NewsDetailModal item={selectedNews} onClose={() => setSelectedNews(null)} />}
+  </section>
+}
+
 function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { data: AShareSentiment | null; loading: boolean; error: string; onRefresh: () => void; onOpenHistory: () => void }) {
   const maxWordCount = Math.max(1, ...(data?.hot_words.map(word => word.count) ?? [1]))
+  const marketMoveClass = (value: number) => value >= 0 ? 'red' : 'green'
   return <section className="cn-market">
     <div className="page-title"><div><h1>A股市场情绪图</h1></div><div className="refresh-panel"><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button><small>数据抓取时间：{formatDateTime(data?.generated_at)}</small></div></div>
     {error && <div className="alert">{error}</div>}
@@ -278,8 +425,8 @@ function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { dat
         </button>
         <div className="cn-stats">
           <div><span>当日平均股价</span><strong>{data.average_price.toFixed(2)}</strong></div>
-          <div><span>平均涨跌幅</span><strong className={data.average_change_pct >= 0 ? 'green' : 'red'}>{data.average_change_pct.toFixed(2)}%</strong></div>
-          <div><span>上涨/下跌</span><strong><i className="green">{data.up_count}</i><small>/</small><i className="red">{data.down_count}</i></strong></div>
+          <div><span>平均涨跌幅</span><strong className={marketMoveClass(data.average_change_pct)}>{data.average_change_pct.toFixed(2)}%</strong></div>
+          <div><span>上涨/下跌</span><strong><i className="red">{data.up_count}</i><small>/</small><i className="green">{data.down_count}</i></strong></div>
           <div><span>样本股票数</span><strong>{data.stock_count}</strong></div>
         </div>
       </div>
@@ -293,11 +440,11 @@ function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { dat
           </article>)}</div>
         </section>
         <section className="market-sample">
-          <h3>行情样本</h3>
-          <div>{data.market_sample.slice(0, 10).map(item => <article key={item.code}>
+          <h3>涨幅前10板块</h3>
+          <div>{data.hot_sectors.slice(0, 10).map(item => <article key={item.code}>
             <b>{item.name}</b>
-            <span>{item.price.toFixed(2)}</span>
-            <strong className={item.change_pct >= 0 ? 'green' : 'red'}>{item.change_pct.toFixed(2)}%</strong>
+            <span>{item.leading_stock || item.code}</span>
+            <strong className={marketMoveClass(item.change_pct)}>{item.change_pct.toFixed(2)}%</strong>
           </article>)}</div>
         </section>
       </div>
@@ -306,9 +453,9 @@ function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { dat
         <div>{data.hot_sectors.slice(0, 12).map((sector, index) => <article key={sector.code}>
           <b>{index + 1}</b>
           <strong>{sector.name}<small>{sector.code}</small></strong>
-          <span className={sector.change_pct >= 0 ? 'green' : 'red'}>{sector.change_pct.toFixed(2)}%</span>
+          <span className={marketMoveClass(sector.change_pct)}>{sector.change_pct.toFixed(2)}%</span>
           <span>成交 {cnyAmount(sector.amount)}</span>
-          <span className={sector.main_inflow >= 0 ? 'green' : 'red'}>主力 {cnyAmount(sector.main_inflow)}</span>
+          <span className={marketMoveClass(sector.main_inflow)}>主力 {cnyAmount(sector.main_inflow)}</span>
           <em>领涨 {sector.leading_stock || '待补充'} {sector.leading_stock_change_pct ? `${sector.leading_stock_change_pct.toFixed(2)}%` : ''}</em>
         </article>)}</div>
       </section>
@@ -328,9 +475,15 @@ export default function App() {
   const [error, setError] = useState('')
   const [report, setReport] = useState<Report | null>(null)
   const [data, setData] = useState<LatestIPO[]>([])
+  const [expiredData, setExpiredData] = useState<LatestIPO[]>([])
+  const [ipoHistoryOpen, setIPOHistoryOpen] = useState(false)
+  const [historyReferenceDate, setHistoryReferenceDate] = useState(localISODate())
   const [aShareData, setAShareData] = useState<AShareSentiment | null>(null)
   const [aShareLoading, setAShareLoading] = useState(false)
   const [aShareError, setAShareError] = useState('')
+  const [usMarketData, setUSMarketData] = useState<USMarketDashboard | null>(null)
+  const [usMarketLoading, setUSMarketLoading] = useState(false)
+  const [usMarketError, setUSMarketError] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
@@ -345,9 +498,19 @@ export default function App() {
       const activeParams = reportDate
         ? `?active=true&report_date=${encodeURIComponent(reportDate)}&page_size=100`
         : '?active=true&page_size=100'
-      const listing = await api.listIPOs(activeParams)
-      const details = await Promise.all(listing.items.map(item => api.getIPO(item.id)))
-      setData(details.map(toLatestIPO).sort((a, b) => (b.total - a.total) || ((b.sub ?? 0) - (a.sub ?? 0))))
+      const referenceDate = reportDate ?? localISODate()
+      const [listing, allListing] = await Promise.all([
+        api.listIPOs(activeParams),
+        api.listIPOs('?page_size=100&sort=deadline&order=desc'),
+      ])
+      const activeIds = new Set(listing.items.map(item => item.id))
+      const expiredSummaries = allListing.items.filter(item => item.deadline < referenceDate && !activeIds.has(item.id))
+      const detailIds = [...new Set([...listing.items.map(item => item.id), ...expiredSummaries.map(item => item.id)])]
+      const details = await Promise.all(detailIds.map(id => api.getIPO(id)))
+      const detailById = new Map(details.map(item => [item.id, toLatestIPO(item)]))
+      setData(listing.items.map(item => detailById.get(item.id)).filter((item): item is LatestIPO => Boolean(item)).sort((a, b) => (b.total - a.total) || ((b.sub ?? 0) - (a.sub ?? 0))))
+      setExpiredData(expiredSummaries.map(item => detailById.get(item.id)).filter((item): item is LatestIPO => Boolean(item)).sort((a, b) => b.end.localeCompare(a.end) || (b.total - a.total)))
+      setHistoryReferenceDate(referenceDate)
       setReport(reports[0] ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载数据失败')
@@ -372,8 +535,21 @@ export default function App() {
     }
   }
 
+  const loadUSMarketData = async (refresh = false) => {
+    setUSMarketLoading(true)
+    setUSMarketError('')
+    try {
+      setUSMarketData(await api.usMarketDashboard(refresh))
+    } catch (e) {
+      setUSMarketError(e instanceof Error ? e.message : '美股数据加载失败')
+    } finally {
+      setUSMarketLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (market === 'cn' && !aShareData && !aShareLoading) void loadAShareData(false)
+    if (market === 'us' && !usMarketData && !usMarketLoading) void loadUSMarketData(false)
   }, [market])
 
   const openHistory = async () => {
@@ -453,12 +629,15 @@ export default function App() {
       {!loading && !error && <>
         <Insights data={data} onOpen={setSelected} />
         <FundingConflict data={data} />
-        <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => { setIndustry(''); setTier('') }}><RefreshCw size={16}/>重置</button></div>
+        <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => window.location.reload()}><RefreshCw size={16}/>重置</button><button className="secondary history-button" onClick={() => setIPOHistoryOpen(true)}><Archive size={16}/>历史记录<span>{expiredData.length}</span></button></div>
         <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
         {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
       </>}
-    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} onOpenHistory={openHistory} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
+    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} onOpenHistory={openHistory} /> : <USMarketDashboardView data={usMarketData} loading={usMarketLoading} error={usMarketError} onRefresh={() => loadUSMarketData(true)} />}
     <DetailDrawer item={selected} onClose={() => setSelected(null)} />
+    {ipoHistoryOpen && <IPOHistoryModal items={expiredData} referenceDate={historyReferenceDate} onOpen={(item) => {
+      setSelected(item)
+    }} onClose={() => setIPOHistoryOpen(false)} />}
     {historyOpen && <SentimentHistoryModal points={historyPoints} loading={historyLoading} error={historyError} onClose={() => setHistoryOpen(false)} />}
     <footer>免责声明：数据来自本地招股书及结构化资料，仅供研究参考，不构成任何投资建议。投资有风险，入市需谨慎。</footer>
   </main>

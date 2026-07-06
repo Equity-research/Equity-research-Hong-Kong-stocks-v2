@@ -25,10 +25,15 @@ MARKET_PARAMS = (
     "&fltt=2&invt=2&fid=f2&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
     "&fields=f12,f14,f2,f3,f4,f5,f6"
 )
-GUBA_URLS = [
+DISCUSSION_URLS = [
     ("东方财富股吧-上证指数", "https://guba.eastmoney.com/list,zssh000001.html"),
     ("东方财富股吧-深证成指", "https://guba.eastmoney.com/list,zssz399001.html"),
     ("东方财富股吧-创业板指", "https://guba.eastmoney.com/list,zssz399006.html"),
+    ("同花顺财经热点", "https://news.10jqka.com.cn/hotnews_list/"),
+    ("同花顺热点概念", "https://stock.10jqka.com.cn/gngyw_list/"),
+    ("同花顺财经首页", "https://www.10jqka.com.cn/"),
+    ("雪球今日话题", "https://xueqiu.com/today"),
+    ("雪球上证指数", "https://xueqiu.com/S/SH000001"),
 ]
 BOARD_PARAMS = (
     "po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281"
@@ -71,6 +76,15 @@ WORD_WEIGHTS = {
     "轮动": 0,
     "成交": 0,
     "热点": 1,
+}
+TOKEN_STOP_PARTS = {
+    "个股股价",
+    "股价跌破",
+    "点击查看",
+    "查看更多",
+    "文章来源",
+    "责任编辑",
+    "app下载",
 }
 
 
@@ -199,7 +213,7 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
         "hot_words_file": str(hot_words_file),
         "hot_sectors_file": str(hot_sectors_file),
         "hot_words": [word.__dict__ for word in hot_words],
-        "hot_sectors": [sector.__dict__ for sector in hot_sectors[:20]],
+        "hot_sectors": [sector.__dict__ for sector in sorted(hot_sectors, key=lambda item: item.change_pct, reverse=True)[:20]],
         "market_sample": [row.__dict__ for row in market_rows[:20]],
     }
     maybe_record_close_sentiment(result)
@@ -434,7 +448,7 @@ def fetch_discussion_titles() -> tuple[list[str], list[str]]:
     titles: list[str] = []
     sources: list[str] = []
     with httpx.Client(timeout=12, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        for name, url in GUBA_URLS:
+        for name, url in DISCUSSION_URLS:
             try:
                 response = client.get(url)
                 response.raise_for_status()
@@ -452,12 +466,27 @@ def parse_titles(html: str) -> list[str]:
     matches = re.findall(r'title=["\']([^"\']{4,80})["\']', html)
     matches.extend(re.findall(r'class=["\'][^"\']*title[^"\']*["\'][^>]*>([^<]{4,80})<', html))
     matches.extend(re.findall(r'<div class=["\']title["\']>\s*<a[^>]*>([^<]{2,100})</a>', html))
+    matches.extend(re.findall(r'<h[1-4][^>]*>\s*<a[^>]*>([^<]{4,100})</a>', html))
+    matches.extend(re.findall(r'<a[^>]*>([^<]{6,100})</a>', html))
     cleaned = []
     for title in matches:
         text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", title)).strip()
-        if text and "东方财富" not in text and text not in cleaned:
+        if is_discussion_text(text) and text not in cleaned:
             cleaned.append(text)
     return cleaned[:80]
+
+
+def is_discussion_text(text: str) -> bool:
+    if not text or any(skip in text for skip in (
+        "东方财富网", "同花顺", "雪球，聪明", "ICP备", "举报", "隐私", "用户协议", "app下载", "客户端下载",
+    )):
+        return False
+    if len(text) < 4 or len(text) > 100:
+        return False
+    return any(key in text for key in (
+        "A股", "市场", "指数", "板块", "资金", "主力", "涨", "跌", "牛市", "回调", "反弹", "震荡", "热点",
+        "行情", "成交", "风险", "机会", "科技", "半导体", "创新药", "机器人", "芯片", "算力",
+    ))
 
 
 def extract_hot_words(titles: list[str]) -> list[HotWord]:
@@ -471,6 +500,8 @@ def extract_hot_words(titles: list[str]) -> list[HotWord]:
         if token in WORD_WEIGHTS:
             continue
         if token in {"股吧", "东方", "财富", "上证", "指数", "深证", "创业板"}:
+            continue
+        if any(part in token for part in TOKEN_STOP_PARTS):
             continue
         if any(key in token for key in ("涨", "跌", "资金", "主力", "市场", "热点", "风险", "震荡", "成交")):
             counter[token] += 1

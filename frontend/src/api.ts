@@ -1,4 +1,4 @@
-import type { AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, IPODetail, IPOList, Report } from './types'
+import type { AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, IPODetail, IPOList, Report, USMarketDashboard } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -21,6 +21,7 @@ export const api = {
   dataRefreshStatus: (id: string) => request<DataRefreshStatus>(`/data-refresh/${id}`),
   aShareSentiment: (refresh = false) => request<AShareSentiment>(`/a-shares/sentiment${refresh ? '?refresh=true' : ''}`),
   aShareSentimentHistory: () => request<AShareSentimentHistoryPoint[]>('/a-shares/sentiment/history?limit=15'),
+  usMarketDashboard: (refresh = false) => request<USMarketDashboard>(`/us-market/dashboard${refresh ? '?refresh=true' : ''}`),
   rules: () => request<Record<string, unknown>>('/scoring-rules'),
   downloadUrl: (id: number, format: 'md' | 'pdf') => `${API}/reports/${id}/download?format=${format}`,
 }

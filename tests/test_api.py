@@ -11,10 +11,12 @@ def test_api_flow(tmp_path, monkeypatch):
     import app.repository as repository
     import app.reporting as reporting
     import app.a_share_sentiment as a_share_sentiment
+    import app.us_market as us_market
     monkeypatch.setattr(database, "DATA_DIR", tmp_path)
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(daily_ipo, "DATA_DIR", tmp_path)
     monkeypatch.setattr(a_share_sentiment, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(us_market, "DATA_DIR", tmp_path)
     monkeypatch.setattr(a_share_sentiment, "fetch_market_rows", lambda: ([
         a_share_sentiment.MarketRow("000001", "平安银行", 11.2, 1.23, 0.14, 100, 200),
         a_share_sentiment.MarketRow("600000", "浦发银行", 9.8, -0.4, -0.04, 80, 160),
@@ -83,3 +85,25 @@ def test_api_flow(tmp_path, monkeypatch):
         assert "反弹" in [item["word"] for item in sentiment["hot_words"]]
         assert (tmp_path / "a_share_market_2026-07-02.csv").exists()
         assert (tmp_path / "a_share_hot_words_2026-07-02.csv").exists()
+        monkeypatch.setattr(us_market, "fetch_news_items", lambda query, limit=5, fallback_query=None: [
+            us_market.NewsItem(
+                "AI memory demand rises",
+                "测试新闻",
+                "https://example.com/news",
+                None,
+                original_url="https://example.com/original-news",
+                original_title="AI memory demand rises",
+                original_body="AI memory demand rises as server buyers add capacity.",
+                original_saved_at="2026-07-02T10:00:00+08:00",
+            )
+        ])
+        monkeypatch.setattr(us_market, "fetch_qqq_quote", lambda: {"price": 512.3, "change": 2.1, "change_pct": 0.41, "quote_time": "2026-07-02"})
+        monkeypatch.setattr(us_market, "fetch_qqq_history", lambda: [{"date": "2026-07-02", "open": 510.2, "high": 513.1, "low": 509.8, "close": 512.3, "change_pct": 0.41}])
+        us_dashboard = client.get("/api/us-market/dashboard?record_date=2026-07-02&refresh=true").json()
+        assert us_dashboard["qqq"]["symbol"] == "QQQ"
+        assert "内存芯片" in [item["name"] for item in us_dashboard["modules"]]
+        assert us_dashboard["qqq"]["history"][0]["open"] == 510.2
+        assert us_dashboard["modules"][0]["news"][0]["title_zh"]
+        assert us_dashboard["modules"][0]["news"][0]["article_summary_zh"].startswith("文章总结")
+        assert us_dashboard["modules"][0]["news"][0]["original_body"].startswith("AI memory demand rises")
+        assert (tmp_path / "us_market_news_2026-07-02.json").exists()

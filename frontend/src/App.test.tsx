@@ -51,12 +51,17 @@ afterEach(() => {
 
 describe('App', () => {
   it('loads the latest IPO data from the API', async () => {
+    const expiredIPO = makeIPO({ id: 2, name: '历史科技', code: '09999.HK', deadline: '2026-07-02', recommendation: '观望', final_score: 5 })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ipos?active=true')) {
         return Response.json({ items: [{ ...ipo, dimensions: undefined, risks: undefined, metrics: undefined, adjustments: undefined }], total: 1, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
       }
+      if (url.includes('/ipos?page_size=100')) {
+        return Response.json({ items: [ipo, expiredIPO], total: 2, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
+      }
       if (url.endsWith('/ipos/1')) return Response.json(ipo)
+      if (url.endsWith('/ipos/2')) return Response.json(expiredIPO)
       if (url.endsWith('/reports')) return Response.json([{ id: 1, report_date: '2026-07-03', version: 1, created_at: '2026-07-03T14:39:47', item_count: 1, buy_count: 1, hold_count: 0, avoid_count: 0 }])
       return Response.json({}, { status: 404 })
     }))
@@ -71,16 +76,55 @@ describe('App', () => {
     expect(screen.getAllByText('普源精电').length).toBeGreaterThan(0)
     expect(screen.getByText(/数据截至 2026-07-03 14:39/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /生成今日日报/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /历史记录/ }))
+    expect(screen.getByText('07-02 截止')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /历史科技/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('07-02 截止'))
+    fireEvent.click(screen.getByRole('button', { name: /历史科技/ }))
+    expect(screen.getByRole('heading', { name: '历史科技' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
+    expect(screen.getByRole('heading', { name: '历史记录' })).toBeInTheDocument()
+    expect(screen.getByText('历史科技')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('07-02 截止'))
+    expect(screen.queryByRole('button', { name: /历史科技/ })).not.toBeInTheDocument()
   })
 
-  it('keeps US empty and renders the A-share sentiment page', async () => {
+  it('renders the US dashboard and the A-share sentiment page', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ipos?active=true')) {
         return Response.json({ items: [{ ...ipo, dimensions: undefined, risks: undefined, metrics: undefined, adjustments: undefined }], total: 1, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
       }
+      if (url.includes('/ipos?page_size=100')) {
+        return Response.json({ items: [ipo], total: 1, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
+      }
       if (url.endsWith('/ipos/1')) return Response.json(ipo)
       if (url.endsWith('/reports')) return Response.json([{ id: 1, report_date: '2026-07-03', version: 1, created_at: '2026-07-03T14:39:47', item_count: 1, buy_count: 1, hold_count: 0, avoid_count: 0 }])
+      if (url.endsWith('/us-market/dashboard')) return Response.json({
+        record_date: '2026-07-06',
+        generated_at: '2026-07-06T10:20:00+08:00',
+        source: 'Google News RSS / Yahoo Finance QQQ',
+        cache_file: '/tmp/us_market_news_2026-07-06.json',
+        highlights: ['偏强模块：半导体、内存芯片，短线更适合关注顺势延续。', 'QQQ 当前判断：偏强。科技权重仍有上行动能。'],
+        modules: [
+          { key: 'semiconductors', name: '半导体', focus: '人工智能算力', sentiment_score: 4, trend: '偏强', analysis: '半导体新闻偏正面。', news: [{ title: 'Nvidia chip demand rises', title_zh: '英伟达芯片需求上升', source: 'Reuters', source_zh: '路透社', url: 'https://example.com/1', published_at: null, article_summary_zh: '文章总结：英伟达芯片需求改善。', article_body_zh: '中文编译：英伟达芯片需求改善。', article_key_points_zh: ['英伟达芯片需求改善'], original_url: 'https://example.com/original-1', original_title: 'Nvidia chip demand rises', original_body: 'Nvidia chip demand rises as data center customers keep ordering accelerators.', original_saved_at: '2026-07-06T10:21:00+08:00' }] },
+          { key: 'memory_chips', name: '内存芯片', focus: '高带宽内存 和 DRAM', sentiment_score: 3, trend: '偏强', analysis: '内存芯片周期改善。', news: [{ title: 'Micron memory demand improves', title_zh: '美光内存需求改善', source: 'Bloomberg', source_zh: '彭博社', url: 'https://example.com/2', published_at: null, article_summary_zh: '文章总结：美光内存周期改善。', article_body_zh: '中文编译：美光内存周期改善。', article_key_points_zh: ['美光内存周期改善'] }] },
+        ],
+        qqq: {
+          symbol: 'QQQ',
+          price: 512.34,
+          change: 3.21,
+          change_pct: 0.63,
+          quote_time: '2026-07-03 22:00',
+          trend: '偏强',
+          analysis: 'QQQ 最新日内变动约 0.63%，新闻与价格信号偏强。',
+          history: [
+            { date: '2026-07-02', open: 508.1, high: 510.2, low: 506.8, close: 509.1, change_pct: 0.2 },
+            { date: '2026-07-03', open: 509.4, high: 513.2, low: 508.9, close: 512.34, change_pct: 0.63 },
+          ],
+          news: [{ title: 'Nasdaq 100 ETF gains', title_zh: '纳指100ETF上涨', source: 'MarketWatch', source_zh: '市场观察', url: 'https://example.com/3', published_at: null, article_summary_zh: '文章总结：纳指100ETF走强。', article_body_zh: '中文编译：纳指100ETF走强。', article_key_points_zh: ['纳指100ETF走强'] }],
+        },
+      })
       if (url.endsWith('/a-shares/sentiment')) return Response.json({
         record_date: '2026-07-06',
         generated_at: '2026-07-06T09:40:00+08:00',
@@ -112,7 +156,14 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: '美股' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.queryByText('今日 IPO 分析')).not.toBeInTheDocument()
     expect(screen.queryByText('普源精电')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('美股页面')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('美股行业动态')).toBeInTheDocument())
+    expect(screen.getByText('内存芯片')).toBeInTheDocument()
+    expect(screen.getByText('纳指100ETF 新闻动态')).toBeInTheDocument()
+    expect(screen.getByText('英伟达芯片需求上升')).toBeInTheDocument()
+    expect(screen.getByText('文章总结：英伟达芯片需求改善。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /英伟达芯片需求上升/ }))
+    expect(screen.getByRole('heading', { name: '已保存原文' })).toBeInTheDocument()
+    expect(screen.getByText(/data center customers keep ordering accelerators/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'A股' }))
     expect(screen.getByRole('tab', { name: 'A股' })).toHaveAttribute('aria-selected', 'true')
@@ -154,6 +205,9 @@ describe('App', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ipos?active=true')) {
+        return Response.json({ items: [qiyunshan, luoshi], total: 2, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
+      }
+      if (url.includes('/ipos?page_size=100')) {
         return Response.json({ items: [qiyunshan, luoshi], total: 2, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
       }
       const id = Number(url.match(/\/ipos\/(\d+)$/)?.[1])

@@ -75,3 +75,56 @@ export interface AShareSentimentHistoryPoint {
   down_count: number
   flat_count: number
 }
+export interface USMarketNewsItem {
+  title: string
+  source: string
+  url: string
+  published_at: string | null
+  title_zh?: string | null
+  source_zh?: string | null
+  article_title_zh?: string | null
+  article_summary_zh?: string | null
+  article_body_zh?: string | null
+  article_key_points_zh?: string[] | null
+  original_url?: string | null
+  original_title?: string | null
+  original_body?: string | null
+  original_saved_at?: string | null
+}
+export interface USMarketModule {
+  key: string
+  name: string
+  focus: string
+  sentiment_score: number
+  trend: string
+  analysis: string
+  news: USMarketNewsItem[]
+}
+export interface QQQHistoryPoint {
+  date: string | null
+  open: number | null
+  high: number | null
+  low: number | null
+  close: number | null
+  change_pct: number | null
+}
+export interface USMarketQQQ {
+  symbol: string
+  price: number | null
+  change: number | null
+  change_pct: number | null
+  quote_time: string | null
+  trend: string
+  analysis: string
+  history: QQQHistoryPoint[]
+  news: USMarketNewsItem[]
+}
+export interface USMarketDashboard {
+  record_date: string
+  generated_at: string
+  source: string
+  cache_file: string
+  modules: USMarketModule[]
+  qqq: USMarketQQQ
+  highlights: string[]
+}

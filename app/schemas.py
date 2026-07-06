@@ -183,3 +183,61 @@ class AShareSentimentHistoryPoint(BaseModel):
     up_count: int
     down_count: int
     flat_count: int
+
+
+class USMarketNewsItem(BaseModel):
+    title: str
+    source: str
+    url: str
+    published_at: str | None = None
+    title_zh: str | None = None
+    source_zh: str | None = None
+    article_title_zh: str | None = None
+    article_summary_zh: str | None = None
+    article_body_zh: str | None = None
+    article_key_points_zh: list[str] | None = None
+    original_url: str | None = None
+    original_title: str | None = None
+    original_body: str | None = None
+    original_saved_at: str | None = None
+
+
+class USMarketModule(BaseModel):
+    key: str
+    name: str
+    focus: str
+    sentiment_score: int
+    trend: str
+    analysis: str
+    news: list[USMarketNewsItem]
+
+
+class QQQHistoryPoint(BaseModel):
+    date: str | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    change_pct: float | None = None
+
+
+class USMarketQQQ(BaseModel):
+    symbol: str
+    price: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    quote_time: str | None = None
+    trend: str
+    analysis: str
+    history: list[QQQHistoryPoint]
+    news: list[USMarketNewsItem]
+
+
+class USMarketDashboard(BaseModel):
+    record_date: date
+    generated_at: datetime
+    source: str
+    cache_file: str
+    modules: list[USMarketModule]
+    qqq: USMarketQQQ
+    highlights: list[str]
