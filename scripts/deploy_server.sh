@@ -5,6 +5,11 @@ APP_DIR="${APP_DIR:-/opt/stock}"
 SERVICE_NAME="${SERVICE_NAME:-stock-api}"
 BRANCH="${BRANCH:-main}"
 
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+if [ "$(id -u)" = "0" ]; then
+  git config --system --add safe.directory "$APP_DIR" 2>/dev/null || true
+fi
+
 cd "$APP_DIR"
 
 git fetch origin "$BRANCH"
