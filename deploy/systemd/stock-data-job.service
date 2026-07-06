@@ -1,0 +1,13 @@
+[Unit]
+Description=Run stock data refresh job
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stock
+Environment=APP_DIR=/opt/stock
+Environment=SERVICE_NAME=stock-api
+Environment=PORT=8080
+Environment=WAIT_SECONDS=0
+ExecStart=/opt/stock/scripts/tencent_data_job.sh

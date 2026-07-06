@@ -87,6 +87,19 @@ class IPODetail(IPOBase):
     company_quality: list[str] = []
 
 
+class GreyMarketQuote(BaseModel):
+    ipo_id: int
+    code: str
+    price: float
+    change_pct: float | None = None
+    fetched_at: datetime
+    source: str
+
+
+class GreyMarketManualPrice(BaseModel):
+    price: float = Field(gt=0)
+
+
 class ReportSummary(BaseModel):
     id: int
     report_date: date
