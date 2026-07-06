@@ -152,3 +152,16 @@ class AShareSentiment(BaseModel):
     hot_words: list[AShareHotWord]
     hot_sectors: list[AShareHotSector]
     market_sample: list[AShareMarketSample]
+
+
+class AShareSentimentHistoryPoint(BaseModel):
+    record_date: date
+    generated_at: datetime
+    sentiment_score: int
+    sentiment_label: str
+    average_price: float
+    average_change_pct: float
+    stock_count: int
+    up_count: int
+    down_count: int
+    flat_count: int

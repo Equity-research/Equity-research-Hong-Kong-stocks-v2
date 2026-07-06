@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileText, RefreshCw, X } from 'lucide-react'
 import { api } from './api'
-import type { AShareSentiment, IPODetail, Report } from './types'
+import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, Report } from './types'
 
 type Tier = '申购' | '观望' | '回避'
 type Market = 'hk' | 'us' | 'cn'
@@ -229,7 +229,41 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
   </>
 }
 
-function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentiment | null; loading: boolean; error: string; onRefresh: () => void }) {
+function SentimentHistoryModal({ points, loading, error, onClose }: { points: AShareSentimentHistoryPoint[]; loading: boolean; error: string; onClose: () => void }) {
+  const width = 620
+  const height = 260
+  const padding = 36
+  const plotWidth = width - padding * 2
+  const plotHeight = height - padding * 2
+  const x = (index: number) => padding + (points.length <= 1 ? plotWidth / 2 : index / (points.length - 1) * plotWidth)
+  const y = (score: number) => padding + (100 - score) / 100 * plotHeight
+
+  return <>
+    <div className="history-backdrop open" onClick={onClose} />
+    <section className="history-modal" aria-label="近15日市场情绪">
+      <button className="close" aria-label="关闭历史情绪" onClick={onClose}><X size={22} /></button>
+      <h2>近15日市场情绪</h2>
+      {loading && <div className="empty">正在读取历史情绪...</div>}
+      {error && <div className="alert">{error}</div>}
+      {!loading && !error && <>
+        <p>{points.length >= 15 ? '显示最近15个交易记录' : `数据库中仅有 ${points.length} 条记录`}</p>
+        {points.length ? <svg className="sentiment-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="市场情绪点状图">
+          {[0, 25, 50, 75, 100].map(score => <g key={score}>
+            <line x1={padding} x2={width - padding} y1={y(score)} y2={y(score)} />
+            <text x={8} y={y(score) + 4}>{score}</text>
+          </g>)}
+          {points.map((point, index) => <g key={point.record_date}>
+            <circle cx={x(index)} cy={y(point.sentiment_score)} r={7} />
+            <text className="score-label" x={x(index)} y={y(point.sentiment_score) - 12}>{point.sentiment_score}</text>
+            <text className="date-label" x={x(index)} y={height - 10}>{point.record_date.slice(5)}</text>
+          </g>)}
+        </svg> : <div className="empty">暂无收盘后市场情绪记录</div>}
+      </>}
+    </section>
+  </>
+}
+
+function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { data: AShareSentiment | null; loading: boolean; error: string; onRefresh: () => void; onOpenHistory: () => void }) {
   const maxWordCount = Math.max(1, ...(data?.hot_words.map(word => word.count) ?? [1]))
   return <section className="cn-market">
     <div className="page-title"><div><h1>A股市场情绪图</h1></div><div className="refresh-panel"><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button><small>数据抓取时间：{formatDateTime(data?.generated_at)}</small></div></div>
@@ -237,11 +271,11 @@ function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentim
     {loading && <div className="empty">正在读取 A股行情、热词和板块数据...</div>}
     {!loading && data && <>
       <div className="emotion-hero">
-        <div className="emotion-gauge" style={{ ['--score' as string]: `${data.sentiment_score}%` }}>
+        <button className="emotion-gauge" type="button" onClick={onOpenHistory} style={{ ['--score' as string]: `${data.sentiment_score}%` }}>
           <span>市场情绪</span>
           <strong>{data.sentiment_score}</strong>
           <b>{data.sentiment_label}</b>
-        </div>
+        </button>
         <div className="cn-stats">
           <div><span>当日平均股价</span><strong>{data.average_price.toFixed(2)}</strong></div>
           <div><span>平均涨跌幅</span><strong className={data.average_change_pct >= 0 ? 'green' : 'red'}>{data.average_change_pct.toFixed(2)}%</strong></div>
@@ -295,6 +329,10 @@ export default function App() {
   const [aShareData, setAShareData] = useState<AShareSentiment | null>(null)
   const [aShareLoading, setAShareLoading] = useState(false)
   const [aShareError, setAShareError] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [historyPoints, setHistoryPoints] = useState<AShareSentimentHistoryPoint[]>([])
 
   const loadData = async () => {
     setLoading(true)
@@ -335,6 +373,19 @@ export default function App() {
   useEffect(() => {
     if (market === 'cn' && !aShareData && !aShareLoading) void loadAShareData(false)
   }, [market])
+
+  const openHistory = async () => {
+    setHistoryOpen(true)
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      setHistoryPoints(await api.aShareSentimentHistory())
+    } catch (e) {
+      setHistoryError(e instanceof Error ? e.message : '历史情绪数据加载失败')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
 
   const industries = useMemo(() => [...new Set(data.map(item => item.industry))].sort(), [data])
   const visible = data.filter(item => (!industry || item.industry === industry) && (!tier || item.tier === tier))
@@ -378,8 +429,9 @@ export default function App() {
         <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
         {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
       </>}
-    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
+    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} onOpenHistory={openHistory} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
     <DetailDrawer item={selected} onClose={() => setSelected(null)} />
+    {historyOpen && <SentimentHistoryModal points={historyPoints} loading={historyLoading} error={historyError} onClose={() => setHistoryOpen(false)} />}
     <footer>免责声明：数据来自本地招股书及结构化资料，仅供研究参考，不构成任何投资建议。投资有风险，入市需谨慎。</footer>
   </main>
 }

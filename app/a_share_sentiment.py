@@ -1,5 +1,6 @@
 import csv
 import re
+import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -9,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.config import DATA_DIR
+from app.config import DATA_DIR, DB_PATH
 
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -167,7 +168,7 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
     down_count = len([row for row in market_rows if row.change_pct < 0])
     sentiment_score = calculate_sentiment_score(market_rows, hot_words)
 
-    return {
+    result = {
         "record_date": record_date.isoformat(),
         "generated_at": generated_at,
         "average_price": average_price,
@@ -188,6 +189,61 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
         "hot_sectors": [sector.__dict__ for sector in hot_sectors[:20]],
         "market_sample": [row.__dict__ for row in market_rows[:20]],
     }
+    maybe_record_close_sentiment(result)
+    return result
+
+
+def latest_sentiment_history(limit: int = 15) -> list[dict]:
+    ensure_history_table()
+    with sqlite3.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("""
+            SELECT * FROM a_share_sentiment_history
+            ORDER BY record_date DESC LIMIT ?
+        """, (limit,)).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def maybe_record_close_sentiment(payload: dict) -> None:
+    generated_at = datetime.fromisoformat(payload["generated_at"])
+    valid_market = payload["stock_count"] >= 100 and payload["average_price"] > 0
+    if generated_at.time().hour < 15 or not valid_market:
+        return
+    ensure_history_table()
+    with sqlite3.connect(DB_PATH) as db:
+        db.execute("""
+            INSERT INTO a_share_sentiment_history
+              (record_date, generated_at, sentiment_score, sentiment_label, average_price,
+               average_change_pct, stock_count, up_count, down_count, flat_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(record_date) DO UPDATE SET
+              generated_at=excluded.generated_at,
+              sentiment_score=excluded.sentiment_score,
+              sentiment_label=excluded.sentiment_label,
+              average_price=excluded.average_price,
+              average_change_pct=excluded.average_change_pct,
+              stock_count=excluded.stock_count,
+              up_count=excluded.up_count,
+              down_count=excluded.down_count,
+              flat_count=excluded.flat_count
+        """, (
+            payload["record_date"], payload["generated_at"], payload["sentiment_score"], payload["sentiment_label"],
+            payload["average_price"], payload["average_change_pct"], payload["stock_count"], payload["up_count"],
+            payload["down_count"], payload["flat_count"],
+        ))
+
+
+def ensure_history_table() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as db:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS a_share_sentiment_history (
+              record_date TEXT PRIMARY KEY, generated_at TEXT NOT NULL, sentiment_score INTEGER NOT NULL,
+              sentiment_label TEXT NOT NULL, average_price REAL NOT NULL, average_change_pct REAL NOT NULL,
+              stock_count INTEGER NOT NULL, up_count INTEGER NOT NULL, down_count INTEGER NOT NULL,
+              flat_count INTEGER NOT NULL
+            )
+        """)
 
 
 def fetch_market_rows() -> tuple[list[MarketRow], str]:

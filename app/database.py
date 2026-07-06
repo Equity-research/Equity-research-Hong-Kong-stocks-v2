@@ -43,6 +43,12 @@ def initialize() -> None:
           hold_count INTEGER NOT NULL, avoid_count INTEGER NOT NULL,
           UNIQUE(report_date, version)
         );
+        CREATE TABLE IF NOT EXISTS a_share_sentiment_history (
+          record_date TEXT PRIMARY KEY, generated_at TEXT NOT NULL, sentiment_score INTEGER NOT NULL,
+          sentiment_label TEXT NOT NULL, average_price REAL NOT NULL, average_change_pct REAL NOT NULL,
+          stock_count INTEGER NOT NULL, up_count INTEGER NOT NULL, down_count INTEGER NOT NULL,
+          flat_count INTEGER NOT NULL
+        );
         """)
         count = db.execute("SELECT COUNT(*) FROM ipos").fetchone()[0]
         if count == 0:

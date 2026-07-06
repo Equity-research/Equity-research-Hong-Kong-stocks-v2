@@ -3,14 +3,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from app.a_share_sentiment import build_a_share_sentiment
+from app.a_share_sentiment import build_a_share_sentiment, latest_sentiment_history
 from app.config import load_rules
 from app.config import ROOT
 from app.daily_ipo import DailyIPODataMissingError, active_subscription_codes
 from app.database import initialize
 from app.repository import list_ipos, get_ipo, add_adjustment
 from app.reporting import create_report, list_reports, get_report, report_pdf
-from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment
+from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint
 
 app = FastAPI(title="港股 IPO 分析 API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -65,6 +65,11 @@ def scoring_rules():
 @app.get("/api/a-shares/sentiment", response_model=AShareSentiment)
 def a_share_sentiment(record_date: date | None = None, refresh: bool = False):
     return build_a_share_sentiment(record_date, refresh)
+
+
+@app.get("/api/a-shares/sentiment/history", response_model=list[AShareSentimentHistoryPoint])
+def a_share_sentiment_history(limit: int = Query(15, ge=1, le=60)):
+    return latest_sentiment_history(limit)
 
 
 @app.post("/api/reports", response_model=ReportDetail, status_code=201)

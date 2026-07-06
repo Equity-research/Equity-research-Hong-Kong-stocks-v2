@@ -1,4 +1,4 @@
-import type { AShareSentiment, IPODetail, IPOList, Report } from './types'
+import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, IPOList, Report } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -18,6 +18,7 @@ export const api = {
   reports: () => request<Report[]>('/reports'),
   createReport: () => request<Report>('/reports', { method: 'POST' }),
   aShareSentiment: (refresh = false) => request<AShareSentiment>(`/a-shares/sentiment${refresh ? '?refresh=true' : ''}`),
+  aShareSentimentHistory: () => request<AShareSentimentHistoryPoint[]>('/a-shares/sentiment/history?limit=15'),
   rules: () => request<Record<string, unknown>>('/scoring-rules'),
   downloadUrl: (id: number, format: 'md' | 'pdf') => `${API}/reports/${id}/download?format=${format}`,
 }

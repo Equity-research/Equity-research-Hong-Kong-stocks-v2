@@ -50,3 +50,15 @@ export interface AShareSentiment {
   hot_sectors: AShareHotSector[]
   market_sample: AShareMarketSample[]
 }
+export interface AShareSentimentHistoryPoint {
+  record_date: string
+  generated_at: string
+  sentiment_score: number
+  sentiment_label: string
+  average_price: number
+  average_change_pct: number
+  stock_count: number
+  up_count: number
+  down_count: number
+  flat_count: number
+}
