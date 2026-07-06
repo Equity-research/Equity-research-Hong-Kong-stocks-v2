@@ -5,7 +5,8 @@ def test_dimension_weights_sum_to_10_and_missing_scores_zero():
     dimensions, score = score_ipo({})
     assert sum(item.weight for item in dimensions) == 10
     assert score == 0
-    assert all(item.missing for item in dimensions)
+    assert all(item.missing for item in dimensions if item.key != "greenshoe")
+    assert next(item for item in dimensions if item.key == "greenshoe").missing == []
 
 
 def test_recommendation_boundaries():
@@ -66,12 +67,18 @@ def test_cornerstone_presence_is_inferred_from_investors_or_ratio():
     assert metrics["greenshoe"] is True
 
 
-def test_befar_unknown_greenshoe_scores_zero():
+def test_missing_greenshoe_defaults_to_false():
+    metrics = normalize_metrics({})
+
+    assert metrics["greenshoe"] is False
+
+
+def test_befar_has_no_greenshoe_and_scores_zero():
     from app.sample_data import SAMPLE_IPOS
 
     metrics = next(item["metrics"] for item in SAMPLE_IPOS if item["code"] == "06745.HK")
     dimensions, _ = score_ipo(metrics)
     by_key = {item.key: item.score for item in dimensions}
 
-    assert normalize_metrics(metrics)["greenshoe"] is None
+    assert normalize_metrics(metrics)["greenshoe"] is False
     assert by_key["greenshoe"] == 0

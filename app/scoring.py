@@ -77,6 +77,8 @@ def normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
             if parsed is not None:
                 normalized["greenshoe"] = parsed
                 break
+    if normalized["greenshoe"] is None:
+        normalized["greenshoe"] = False
 
     inferred_cornerstone = bool(investors) or (ratio is not None and ratio > 0)
     if normalized["has_cornerstone"] is None and inferred_cornerstone:
