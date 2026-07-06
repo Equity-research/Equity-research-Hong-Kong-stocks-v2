@@ -1,7 +1,7 @@
 record_date,hk_code,company_name,a_ticker,h_offer_price_hkd,a_close_cny,cny_hkd,ah_premium,source,notes
-2026-07-03,00537.HK,普源精电,688337.SS,45.98,67.6,1.1566,70,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
-2026-07-03,02475.HK,立讯精密,002475.SZ,63.28,64.96,1.1566,18.7,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
-2026-07-03,06951.HK,三环集团,300408.SZ,100.3,145.45,1.1566,67.7,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
-2026-07-03,01377.HK,鼎泰高科,301377.SZ,380.0,521.71,1.1566,58.8,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
-2026-07-03,02249.HK,晶合集成,688249.SS,32.3,61.31,1.1566,119.5,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
-2026-07-03,06745.HK,滨化股份,601678.SS,3.59,6.93,1.1566,123.3,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,00537.HK,普源精电,688337.SS,45.98,66.66,1.1561,67.6,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,02475.HK,立讯精密,002475.SZ,63.28,64.44,1.1561,17.7,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,06951.HK,三环集团,300408.SZ,100.3,144.89,1.1561,67,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,01377.HK,鼎泰高科,301377.SZ,380.0,518.04,1.1561,57.6,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,02249.HK,晶合集成,688249.SS,32.3,61.1,1.1561,118.7,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
+2026-07-03,06745.HK,滨化股份,601678.SS,3.59,6.93,1.1561,123.2,Yahoo Finance chart API,A股最新日线收盘价按 CNY/HKD 转港币后与H股招股价比较
