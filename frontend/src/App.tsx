@@ -278,7 +278,6 @@ function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentim
           <em>领涨 {sector.leading_stock || '待补充'} {sector.leading_stock_change_pct ? `${sector.leading_stock_change_pct.toFixed(2)}%` : ''}</em>
         </article>)}</div>
       </section>
-      <p className="data-files">行情：{data.market_file} · 热词：{data.hot_words_file} · 板块：{data.hot_sectors_file} · 来源：{data.market_source} / {data.sector_source} / {data.hot_word_sources.join('、') || 'fallback'}</p>
     </>}
   </section>
 }
