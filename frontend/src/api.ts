@@ -3,7 +3,11 @@ import type { AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, Da
 const API = import.meta.env.VITE_API_URL ?? '/api'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json', ...options?.headers }, ...options })
+  const headers = new Headers(options?.headers)
+  if (options?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const response = await fetch(`${API}${path}`, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: '请求失败' }))
     throw new Error(typeof body.detail === 'string' ? body.detail : '请求失败')
