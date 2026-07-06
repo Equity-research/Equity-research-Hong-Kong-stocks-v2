@@ -102,6 +102,20 @@ class ReportDetail(ReportSummary):
     markdown: str
 
 
+class DataRefreshStart(BaseModel):
+    job_id: str
+    status: str
+
+
+class DataRefreshStatus(BaseModel):
+    job_id: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    report_date: date
+    detail: str | None = None
+
+
 class AShareHotWord(BaseModel):
     word: str
     count: int

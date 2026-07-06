@@ -15,6 +15,8 @@ export interface AllotmentDifficulty { label: string; companies: string[]; note:
 export interface ReportInsights { fundamental_valuation_ranking: string[][]; allotment_difficulty: AllotmentDifficulty[] }
 export interface IPOList { items: IPO[]; total: number; page: number; page_size: number; insights: ReportInsights }
 export interface Report { id: number; report_date: string; version: number; created_at: string; item_count: number; buy_count: number; hold_count: number; avoid_count: number; markdown?: string }
+export interface DataRefreshStart { job_id: string; status: string }
+export interface DataRefreshStatus { job_id: string; status: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at: string | null; report_date: string; detail: string | null }
 export interface AShareHotWord { word: string; count: number; sentiment: 'positive' | 'neutral' | 'negative'; weight: number }
 export interface AShareMarketSample { code: string; name: string; price: number; change_pct: number; change: number; volume: number; amount: number }
 export interface AShareHotSector {

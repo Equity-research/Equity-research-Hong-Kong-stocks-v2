@@ -1,4 +1,8 @@
-from datetime import date
+from datetime import date, datetime
+import subprocess
+import sys
+from threading import Lock, Thread
+from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -10,11 +14,14 @@ from app.daily_ipo import DailyIPODataMissingError, active_subscription_codes
 from app.database import initialize
 from app.repository import list_ipos, get_ipo, add_adjustment
 from app.reporting import create_report, list_reports, get_report, report_pdf
-from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint
+from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus
 
 app = FastAPI(title="港股 IPO 分析 API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+refresh_jobs: dict[str, dict] = {}
+refresh_lock = Lock()
 
 
 @app.on_event("startup")
@@ -60,6 +67,56 @@ def adjust(ipo_id: int, payload: AdjustmentCreate):
 @app.get("/api/scoring-rules")
 def scoring_rules():
     return load_rules()
+
+
+@app.post("/api/data-refresh", response_model=DataRefreshStart, status_code=202)
+def start_data_refresh(report_date: date | None = None):
+    job_id = uuid4().hex
+    target_date = report_date or date.today()
+    job = {
+        "job_id": job_id,
+        "status": "running",
+        "started_at": datetime.now(),
+        "finished_at": None,
+        "report_date": target_date,
+        "detail": None,
+    }
+    with refresh_lock:
+        refresh_jobs[job_id] = job
+    Thread(target=run_data_refresh_job, args=(job_id, target_date), daemon=True).start()
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/data-refresh/{job_id}", response_model=DataRefreshStatus)
+def data_refresh_status(job_id: str):
+    with refresh_lock:
+        job = refresh_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "刷新任务不存在")
+    return job
+
+
+def run_data_refresh_job(job_id: str, report_date: date) -> None:
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "run_daily_report.py"),
+        "--date",
+        report_date.isoformat(),
+        "--wait",
+        "0",
+    ]
+    try:
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=900, check=False)
+        detail = (result.stdout + "\n" + result.stderr).strip()[-4000:] or None
+        status = "succeeded" if result.returncode == 0 else "failed"
+    except Exception as exc:
+        detail = str(exc)
+        status = "failed"
+    with refresh_lock:
+        job = refresh_jobs[job_id]
+        job["status"] = status
+        job["finished_at"] = datetime.now()
+        job["detail"] = detail
 
 
 @app.get("/api/a-shares/sentiment", response_model=AShareSentiment)

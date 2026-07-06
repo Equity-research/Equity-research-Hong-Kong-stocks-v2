@@ -322,6 +322,7 @@ export default function App() {
   const [tier, setTier] = useState('')
   const [selected, setSelected] = useState<LatestIPO | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [refreshingData, setRefreshingData] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [report, setReport] = useState<Report | null>(null)
@@ -404,6 +405,28 @@ export default function App() {
     }
   }
 
+  const refreshData = async () => {
+    setRefreshingData(true)
+    setError('')
+    try {
+      const job = await api.startDataRefresh()
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        const status = await api.dataRefreshStatus(job.job_id)
+        if (status.status === 'succeeded') {
+          window.location.reload()
+          return
+        }
+        if (status.status === 'failed') {
+          throw new Error(status.detail || '刷新数据失败')
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '刷新数据失败')
+      setRefreshingData(false)
+    }
+  }
+
   return <main className="page">
     <div className="market-tabs" role="tablist" aria-label="市场">
       {MARKET_TABS.map(tab => <button
@@ -419,7 +442,7 @@ export default function App() {
       >{tab.label}</button>)}
     </div>
     {market === 'hk' ? <>
-      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div>
+      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><div className="title-actions"><button className="secondary" onClick={refreshData} disabled={refreshingData}><RefreshCw size={16}/>{refreshingData ? '刷新中...' : '刷新数据'}</button><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div></div>
       {error && <div className="alert">{error}</div>}
       {loading && <div className="empty">正在加载最新数据...</div>}
       {!loading && !error && <>
