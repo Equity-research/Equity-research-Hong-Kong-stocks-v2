@@ -11,6 +11,14 @@ export interface IPODetail extends IPO {
   issuance_shares: number | null; lot_size: number | null; greenshoe: boolean | null;
   cornerstone_investors: string[]; cornerstone_ratio: number | null; sponsors: string[]; company_quality: string[]
 }
+export interface GreyMarketQuote {
+  ipo_id: number
+  code: string
+  price: number
+  change_pct: number | null
+  fetched_at: string
+  source: string
+}
 export interface AllotmentDifficulty { label: string; companies: string[]; note: string | null }
 export interface ReportInsights { fundamental_valuation_ranking: string[][]; allotment_difficulty: AllotmentDifficulty[] }
 export interface IPOList { items: IPO[]; total: number; page: number; page_size: number; insights: ReportInsights }

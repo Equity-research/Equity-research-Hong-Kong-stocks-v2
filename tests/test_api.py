@@ -1,4 +1,5 @@
 import importlib
+from datetime import datetime
 from fastapi.testclient import TestClient
 
 
@@ -12,6 +13,7 @@ def test_api_flow(tmp_path, monkeypatch):
     import app.reporting as reporting
     import app.a_share_sentiment as a_share_sentiment
     import app.us_market as us_market
+    import app.grey_market as grey_market
     monkeypatch.setattr(database, "DATA_DIR", tmp_path)
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(daily_ipo, "DATA_DIR", tmp_path)
@@ -58,6 +60,21 @@ def test_api_flow(tmp_path, monkeypatch):
         assert detail["minimum_subscription_amount"] is not None
         assert detail["issuance_shares"] is not None
         assert detail["lot_size"] is not None
+        monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(49.25, datetime.fromisoformat("2026-07-02T18:31:00"), "测试暗盘行情"))
+        grey_quote = client.post(f"/api/ipos/{ipo_id}/grey-market-price").json()
+        assert grey_quote["price"] == 49.25
+        assert grey_quote["source"] == "测试暗盘行情"
+        detail_with_grey = client.get(f"/api/ipos/{ipo_id}").json()
+        assert detail_with_grey["metrics"]["grey_market_price"] == 49.25
+        assert detail_with_grey["metrics"]["grey_market_change_pct"] is not None
+        manual_quote = client.put(f"/api/ipos/{ipo_id}/grey-market-price", json={"price": 5.72}).json()
+        assert manual_quote["price"] == 5.72
+        assert manual_quote["source"] == "手动输入"
+        manual_detail = client.get(f"/api/ipos/{ipo_id}").json()
+        assert manual_detail["metrics"]["grey_market_price"] == 5.72
+        assert manual_detail["metrics"]["grey_market_source"] == "手动输入"
+        finalized = client.post(f"/api/ipos/{ipo_id}/grey-market-price/finalize").json()
+        assert finalized["metrics"]["grey_market_finalized"] is True
         bad = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "这是足够长的调整原因"})
         assert bad.status_code == 422
         short = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "太短"})
@@ -107,3 +124,33 @@ def test_api_flow(tmp_path, monkeypatch):
         assert us_dashboard["modules"][0]["news"][0]["article_summary_zh"].startswith("文章总结")
         assert us_dashboard["modules"][0]["news"][0]["original_body"].startswith("AI memory demand rises")
         assert (tmp_path / "us_market_news_2026-07-02.json").exists()
+
+
+def test_futu_dark_quote_parser(monkeypatch):
+    import app.grey_market as grey_market
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "ret_code": 0,
+                "data": {
+                    "section_list": [
+                        {
+                            "trade_section": "HK_DARK",
+                            "point_list": [
+                                {"time": 1783333860000, "cur_price": 5.68},
+                                {"time": 1783333920000, "cur_price": 5.72},
+                            ],
+                        }
+                    ]
+                },
+            }
+
+    monkeypatch.setattr(grey_market.httpx, "get", lambda *args, **kwargs: Response())
+    quote = grey_market.fetch_futu_dark_quote("02667")
+    assert quote is not None
+    assert quote.price == 5.72
+    assert quote.source == "富途暗盘行情"

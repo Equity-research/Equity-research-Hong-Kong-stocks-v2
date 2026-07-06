@@ -1,6 +1,8 @@
 import json
 from datetime import date, datetime
 from app.database import connect, latest_adjustment
+from app.grey_market import GreyMarketQuote as GreyMarketQuoteValue
+from app.grey_market import fetch_grey_market_quote, quote_to_metrics
 from app.scoring import recommendation
 
 
@@ -97,3 +99,52 @@ def add_adjustment(ipo_id: int, value: float, reason: str, operator: str):
             (ipo_id, value, reason, operator, datetime.now().isoformat(timespec="seconds"), row["original_score"], final))
         adjustment_id = cursor.lastrowid
     return next(item for item in get_ipo(ipo_id)["adjustments"] if item["id"] == adjustment_id)
+
+
+def fetch_and_save_grey_market_price(ipo_id: int):
+    with connect() as db:
+        row = db.execute("SELECT * FROM ipos WHERE id=?", (ipo_id,)).fetchone()
+        if not row:
+            return None
+        quote = fetch_grey_market_quote(row["code"])
+        metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]))
+        db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+    return {
+        "ipo_id": ipo_id,
+        "code": row["code"],
+        "price": quote.price,
+        "change_pct": metrics.get("grey_market_change_pct"),
+        "fetched_at": quote.fetched_at,
+        "source": quote.source,
+    }
+
+
+def save_manual_grey_market_price(ipo_id: int, price: float, finalized: bool = False):
+    with connect() as db:
+        row = db.execute("SELECT * FROM ipos WHERE id=?", (ipo_id,)).fetchone()
+        if not row:
+            return None
+        quote = GreyMarketQuoteValue(price=price, fetched_at=datetime.now(), source="手动输入")
+        metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]), finalized=finalized)
+        db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+    return {
+        "ipo_id": ipo_id,
+        "code": row["code"],
+        "price": quote.price,
+        "change_pct": metrics.get("grey_market_change_pct"),
+        "fetched_at": quote.fetched_at,
+        "source": quote.source,
+    }
+
+
+def finalize_grey_market_price(ipo_id: int):
+    with connect() as db:
+        row = db.execute("SELECT * FROM ipos WHERE id=?", (ipo_id,)).fetchone()
+        if not row:
+            return None
+        metrics = json.loads(row["metrics_json"])
+        if metrics.get("grey_market_price") is None:
+            raise ValueError("请先录入暗盘价格")
+        metrics["grey_market_finalized"] = True
+        db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+    return get_ipo(ipo_id)

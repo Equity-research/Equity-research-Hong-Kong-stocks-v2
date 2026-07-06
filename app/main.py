@@ -13,13 +13,18 @@ from app.config import load_rules
 from app.config import ROOT
 from app.daily_ipo import DailyIPODataMissingError, active_subscription_codes
 from app.database import initialize
-from app.repository import list_ipos, get_ipo, add_adjustment
+from app.repository import list_ipos, get_ipo, add_adjustment, fetch_and_save_grey_market_price, save_manual_grey_market_price, finalize_grey_market_price
 from app.reporting import create_report, list_reports, get_report, report_pdf
-from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, USMarketDashboard
+from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, USMarketDashboard, GreyMarketQuote, GreyMarketManualPrice
 from app.us_market import build_us_market_dashboard
 
 app = FastAPI(title="港股 IPO 分析 API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+app.add_middleware(CORSMiddleware, allow_origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://www.equity-research-hong-kong-stocks.cn",
+    "https://equity-research-hong-kong-stocks.cn",
+],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 refresh_jobs: dict[str, dict] = {}
@@ -62,6 +67,36 @@ def ipo_detail(ipo_id: int):
 @app.post("/api/ipos/{ipo_id}/adjustments", response_model=Adjustment, status_code=201)
 def adjust(ipo_id: int, payload: AdjustmentCreate):
     result = add_adjustment(ipo_id, payload.value, payload.reason, payload.operator)
+    if not result:
+        raise HTTPException(404, "IPO 不存在")
+    return result
+
+
+@app.post("/api/ipos/{ipo_id}/grey-market-price", response_model=GreyMarketQuote)
+def grey_market_price(ipo_id: int):
+    try:
+        result = fetch_and_save_grey_market_price(ipo_id)
+    except ValueError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if not result:
+        raise HTTPException(404, "IPO 不存在")
+    return result
+
+
+@app.put("/api/ipos/{ipo_id}/grey-market-price", response_model=GreyMarketQuote)
+def manual_grey_market_price(ipo_id: int, payload: GreyMarketManualPrice):
+    result = save_manual_grey_market_price(ipo_id, payload.price)
+    if not result:
+        raise HTTPException(404, "IPO 不存在")
+    return result
+
+
+@app.post("/api/ipos/{ipo_id}/grey-market-price/finalize", response_model=IPODetail)
+def finalize_grey_market(ipo_id: int):
+    try:
+        result = finalize_grey_market_price(ipo_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     if not result:
         raise HTTPException(404, "IPO 不存在")
     return result

@@ -5,6 +5,7 @@ import type { AShareSentiment, AShareSentimentHistoryPoint, IPODetail, Report, U
 
 type Tier = '申购' | '观望' | '回避'
 type Market = 'hk' | 'us' | 'cn'
+type HKStage = 'subscribing' | 'filed'
 
 interface LatestIPO {
   id: number
@@ -30,6 +31,12 @@ interface LatestIPO {
   aTicker: string | null
   aClose: number | null
   cnyHkd: number | null
+  expectedListingDate: string | null
+  greyMarketPrice: number | null
+  greyMarketChangePct: number | null
+  greyMarketFetchedAt: string | null
+  greyMarketSource: string | null
+  greyMarketFinalized: boolean
   quality: string[]
   risks: string[]
 }
@@ -41,12 +48,18 @@ const MARKET_TABS: Array<{ key: Market; label: string }> = [
   { key: 'us', label: '美股' },
   { key: 'cn', label: 'A股' },
 ]
+const HK_STAGE_TABS: Array<{ key: HKStage; label: string }> = [
+  { key: 'subscribing', label: '申购中' },
+  { key: 'filed', label: '已递表' },
+]
 
 const money = (value: number | null) => value == null ? '待补充' : `HK$${Math.round(value).toLocaleString('zh-HK')}`
 const numberText = (value: number | null, suffix = '') => value == null ? '待补充' : `${value.toLocaleString('zh-HK')}${suffix}`
 const tierClass = (tier: Tier) => tier === '申购' ? 'buy' : tier === '观望' ? 'hold' : 'avoid'
+const ipoLabel = (item: LatestIPO) => `${item.name}（${item.code}.HK）`
 const shortDate = (value: string) => value.slice(5)
 const priceText = (low: number, high: number) => low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
+const signedPct = (value: number | null) => value == null ? '' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 const localISODate = () => {
   const now = new Date()
   const offsetMs = now.getTimezoneOffset() * 60 * 1000
@@ -100,6 +113,12 @@ function toLatestIPO(item: IPODetail): LatestIPO {
     aTicker: typeof metrics.a_ticker === 'string' ? metrics.a_ticker : null,
     aClose: typeof metrics.a_close_cny === 'number' ? metrics.a_close_cny : null,
     cnyHkd: typeof metrics.cny_hkd === 'number' ? metrics.cny_hkd : null,
+    expectedListingDate: typeof metrics.expected_listing_date === 'string' ? metrics.expected_listing_date : null,
+    greyMarketPrice: typeof metrics.grey_market_price === 'number' ? metrics.grey_market_price : null,
+    greyMarketChangePct: typeof metrics.grey_market_change_pct === 'number' ? metrics.grey_market_change_pct : null,
+    greyMarketFetchedAt: typeof metrics.grey_market_fetched_at === 'string' ? metrics.grey_market_fetched_at : null,
+    greyMarketSource: typeof metrics.grey_market_source === 'string' ? metrics.grey_market_source : null,
+    greyMarketFinalized: metrics.grey_market_finalized === true,
     quality: item.company_quality,
     risks: item.risks,
   }
@@ -136,7 +155,7 @@ function Insights({ data, onOpen }: { data: LatestIPO[]; onOpen: (item: LatestIP
     { label: '较易', min: 0, max: 10, note: '低于10倍认购；仍不代表一定获配' },
   ].map(band => ({
     ...band,
-    companies: data.filter(item => item.sub != null && item.sub >= band.min && item.sub < band.max).map(item => item.name),
+    companies: data.filter(item => item.sub != null && item.sub >= band.min && item.sub < band.max).map(ipoLabel),
   })).filter(group => group.companies.length)
   const reasons = [...data].sort((a, b) => (tierOrder[a.tier] - tierOrder[b.tier]) || (b.total - a.total) || ((b.sub ?? 0) - (a.sub ?? 0)))
 
@@ -150,11 +169,11 @@ function Insights({ data, onOpen }: { data: LatestIPO[]; onOpen: (item: LatestIP
     <div className="insights">
       <section className="decision-reasons"><h3>1）申购/不申购原因</h3><div className="reason-list">
         {reasons.map(item => <article key={item.code}>
-          <b><button className="reason-link" type="button" onClick={() => onOpen(item)}>{item.name}</button><span className={tierClass(item.tier)}>{item.tier}</span></b>
+          <b><button className="reason-link" type="button" onClick={() => onOpen(item)}>{ipoLabel(item)}</button><span className={tierClass(item.tier)}>{item.tier}</span></b>
           <ul>{reasonPoints(item).map(point => <li key={point}>{point}</li>)}</ul>
         </article>)}
       </div></section>
-      <section><h3>2）按优先级排序</h3><p>{ranking.map(item => item.name).join(' > ') || '暂无项目'}</p></section>
+      <section><h3>2）按优先级排序</h3><p>{ranking.map(ipoLabel).join(' > ') || '暂无项目'}</p></section>
       <section><h3>3）中签难度初判</h3><dl>{bands.map(group => <div key={group.label}><dt>{group.label}</dt><dd>{group.companies.join(' + ')}<small>{group.note}</small></dd></div>)}</dl></section>
     </div>
   </section>
@@ -180,7 +199,7 @@ function FundingConflict({ data }: { data: LatestIPO[] }) {
     </div>
     <div className="funding-days">{pressure.map(group => <article key={group.date}>
       <b>{shortDate(group.date)}</b>
-      <strong>{[...group.items].sort((a, b) => b.total - a.total).map(item => item.name).join(' + ')}</strong>
+      <strong>{[...group.items].sort((a, b) => b.total - a.total).map(ipoLabel).join(' + ')}</strong>
       <span>最低一手合计 {money(group.total)}</span>
     </article>)}</div>
   </section>
@@ -200,7 +219,37 @@ function IPOCard({ item, onOpen }: { item: LatestIPO; onOpen: (item: LatestIPO) 
   </button>
 }
 
-function IPOHistoryModal({ items, referenceDate, onOpen, onClose }: { items: LatestIPO[]; referenceDate: string; onOpen: (item: LatestIPO) => void; onClose: () => void }) {
+function GreyMarketInput({ item, onSave, onFinalize, saving }: { item: LatestIPO; onSave: (item: LatestIPO, price: number) => void; onFinalize: (item: LatestIPO) => void; saving: boolean }) {
+  const [editing, setEditing] = useState(item.greyMarketPrice == null)
+  const [value, setValue] = useState(item.greyMarketPrice == null ? '' : item.greyMarketPrice.toFixed(2))
+  const price = Number(value)
+  const canSave = Number.isFinite(price) && price > 0
+  const canEdit = !item.greyMarketFinalized
+  useEffect(() => {
+    if (!editing) setValue(item.greyMarketPrice == null ? '' : item.greyMarketPrice.toFixed(2))
+  }, [editing, item.greyMarketPrice])
+  return <div className="grey-market history-grey-market">
+    <span><b>暗盘价格</b>{item.greyMarketPrice == null ? '待输入' : `${item.greyMarketPrice.toFixed(2)} HKD`}</span>
+    {canEdit && editing ? <form className="grey-market-form" onSubmit={event => {
+      event.preventDefault()
+      if (canSave) {
+        onSave(item, price)
+        setEditing(false)
+      }
+    }}>
+      <input aria-label={`${item.name} 暗盘价格`} inputMode="decimal" placeholder="输入价格" value={value} onChange={event => setValue(event.target.value)} />
+      <button className="secondary grey-market-fetch" type="submit" disabled={!canSave || saving}>{saving ? '保存中...' : '保存'}</button>
+    </form> : <div className="grey-market-actions">
+      {item.greyMarketChangePct != null && <em className={item.greyMarketChangePct < 0 ? 'green' : 'red'}>{signedPct(item.greyMarketChangePct)}</em>}
+      {canEdit && item.greyMarketPrice != null && <>
+        <button type="button" className="secondary grey-market-fetch" onClick={() => setEditing(true)} disabled={saving}>更新</button>
+        <button type="button" className="secondary grey-market-fetch" onClick={() => onFinalize(item)} disabled={saving}>完成录入</button>
+      </>}
+    </div>}
+  </div>
+}
+
+function IPOHistoryModal({ items, referenceDate, onOpen, onClose, onSaveGreyMarket, onFinalizeGreyMarket, greyMarketLoadingIds }: { items: LatestIPO[]; referenceDate: string; onOpen: (item: LatestIPO) => void; onClose: () => void; onSaveGreyMarket: (item: LatestIPO, price: number) => void; onFinalizeGreyMarket: (item: LatestIPO) => void; greyMarketLoadingIds: number[] }) {
   const grouped = [...items]
     .sort((a, b) => b.end.localeCompare(a.end) || (b.total - a.total))
     .reduce<Array<{ date: string; items: LatestIPO[] }>>((groups, item) => {
@@ -219,11 +268,14 @@ function IPOHistoryModal({ items, referenceDate, onOpen, onClose }: { items: Lat
       {items.length ? <div className="ipo-history-list">
         {grouped.map(group => <details className="ipo-history-group" key={group.date}>
           <summary><span>{shortDate(group.date)} 截止</span><b>{group.items.length} 只</b></summary>
-          <div>{group.items.map(item => <button className="ipo-history-item" key={item.code} type="button" onClick={() => onOpen(item)}>
-            <span><strong>{item.name}</strong><small>{item.code}.HK · {item.industry}</small></span>
-            <b className={tierClass(item.tier)}>{item.tier}</b>
-            <em>{item.total.toFixed(0)}分</em>
-          </button>)}</div>
+          <div>{group.items.map(item => <article className="ipo-history-item" key={item.code}>
+            <button className="ipo-history-main" type="button" onClick={() => onOpen(item)}>
+              <span><strong>{item.name}</strong><small>{item.code}.HK · {item.industry}</small></span>
+              <b className={tierClass(item.tier)}>{item.tier}</b>
+              <em>{item.total.toFixed(0)}分</em>
+            </button>
+            <GreyMarketInput item={item} onSave={onSaveGreyMarket} onFinalize={onFinalizeGreyMarket} saving={greyMarketLoadingIds.includes(item.id)} />
+          </article>)}</div>
         </details>)}
       </div> : <div className="empty">暂无过期 IPO 记录</div>}
     </section>
@@ -242,6 +294,11 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
           <b className={tierClass(item.tier)}>{item.tier}</b>
         </div>
         <p className="drawer-meta">港股招股价区间 {item.price} HKD　截止 {item.end}　最小申购 {money(item.minimum)}　认购倍数 {item.sub == null ? '待补充' : `${item.sub.toFixed(2)} 倍`}</p>
+        <section><h3>暗盘价格</h3><div className="grey-market-detail">
+          <strong>{item.greyMarketPrice == null ? '待获取' : `${item.greyMarketPrice.toFixed(2)} HKD`}</strong>
+          {item.greyMarketChangePct != null && <b className={item.greyMarketChangePct < 0 ? 'green' : 'red'}>{signedPct(item.greyMarketChangePct)}</b>}
+          <span>{item.greyMarketFetchedAt ? `记录时间 ${formatDateTime(item.greyMarketFetchedAt)} · ${item.greyMarketSource ?? '行情源'}` : '可在历史记录里手动输入暗盘价格；当日 18:31 仍会尝试自动拉取最终暗盘收盘价。'}</span>
+        </div></section>
         <section><h3>发行资料</h3><dl className="issue-grid">
           <div><dt>港股招股价区间</dt><dd>{item.price} HKD</dd></div>
           <div><dt>绿鞋</dt><dd>{item.greenshoe == null ? '待补充' : item.greenshoe ? '有' : '无'}</dd></div>
@@ -465,6 +522,7 @@ function AShareEmotion({ data, loading, error, onRefresh, onOpenHistory }: { dat
 
 export default function App() {
   const [market, setMarket] = useState<Market>('hk')
+  const [hkStage, setHKStage] = useState<HKStage>('subscribing')
   const [industry, setIndustry] = useState('')
   const [tier, setTier] = useState('')
   const [selected, setSelected] = useState<LatestIPO | null>(null)
@@ -488,6 +546,15 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [historyPoints, setHistoryPoints] = useState<AShareSentimentHistoryPoint[]>([])
+  const [greyMarketLoadingIds, setGreyMarketLoadingIds] = useState<number[]>([])
+  const [autoGreyMarketDate, setAutoGreyMarketDate] = useState('')
+  const [toastMessage, setToastMessage] = useState('')
+
+  const patchIPO = (patch: (current: LatestIPO) => LatestIPO) => {
+    setData(items => items.map(patch))
+    setExpiredData(items => items.map(patch))
+    setSelected(current => current ? patch(current) : current)
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -522,6 +589,90 @@ export default function App() {
   useEffect(() => {
     void loadData()
   }, [])
+
+  const updateGreyMarketQuote = async (item: LatestIPO, silent = false) => {
+    if (greyMarketLoadingIds.includes(item.id) || item.greyMarketPrice != null) return
+    setGreyMarketLoadingIds(ids => [...new Set([...ids, item.id])])
+    if (!silent) setToastMessage('')
+    try {
+      const quote = await api.greyMarketPrice(item.id)
+      const patch = (current: LatestIPO) => current.id === item.id ? {
+        ...current,
+        greyMarketPrice: quote.price,
+        greyMarketChangePct: quote.change_pct,
+        greyMarketFetchedAt: quote.fetched_at,
+        greyMarketSource: quote.source,
+        greyMarketFinalized: false,
+      } : current
+      patchIPO(patch)
+    } catch {
+      if (!silent) setToastMessage('暗盘价格获取失败，请稍后再试')
+    } finally {
+      setGreyMarketLoadingIds(ids => ids.filter(id => id !== item.id))
+    }
+  }
+
+  const saveGreyMarketQuote = async (item: LatestIPO, price: number) => {
+    if (greyMarketLoadingIds.includes(item.id) || item.greyMarketFinalized) return
+    setGreyMarketLoadingIds(ids => [...new Set([...ids, item.id])])
+    setToastMessage('')
+    try {
+      const quote = await api.saveGreyMarketPrice(item.id, price)
+      const patch = (current: LatestIPO) => current.id === item.id ? {
+        ...current,
+        greyMarketPrice: quote.price,
+        greyMarketChangePct: quote.change_pct,
+        greyMarketFetchedAt: quote.fetched_at,
+        greyMarketSource: quote.source,
+        greyMarketFinalized: false,
+      } : current
+      patchIPO(patch)
+    } catch {
+      setToastMessage('暗盘价格保存失败，请稍后再试')
+    } finally {
+      setGreyMarketLoadingIds(ids => ids.filter(id => id !== item.id))
+    }
+  }
+
+  const finalizeGreyMarketQuote = async (item: LatestIPO) => {
+    if (greyMarketLoadingIds.includes(item.id) || item.greyMarketPrice == null || item.greyMarketFinalized) return
+    setGreyMarketLoadingIds(ids => [...new Set([...ids, item.id])])
+    setToastMessage('')
+    try {
+      const detail = await api.finalizeGreyMarketPrice(item.id)
+      const next = toLatestIPO(detail)
+      patchIPO(current => current.id === item.id ? next : current)
+    } catch {
+      setToastMessage('暗盘价格完成录入失败，请稍后再试')
+    } finally {
+      setGreyMarketLoadingIds(ids => ids.filter(id => id !== item.id))
+    }
+  }
+
+  useEffect(() => {
+    if (!toastMessage) return
+    const timer = window.setTimeout(() => setToastMessage(''), 2600)
+    return () => window.clearTimeout(timer)
+  }, [toastMessage])
+
+  useEffect(() => {
+    if (market !== 'hk' || loading || !data.length) return
+    const runDate = localISODate()
+    const now = new Date()
+    const target = new Date(now)
+    target.setHours(18, 31, 0, 0)
+    const fetchMissing = () => {
+      if (autoGreyMarketDate === runDate) return
+      setAutoGreyMarketDate(runDate)
+      data.filter(item => item.greyMarketPrice == null).forEach(item => void updateGreyMarketQuote(item, true))
+    }
+    if (now >= target) {
+      fetchMissing()
+      return
+    }
+    const timer = window.setTimeout(fetchMissing, target.getTime() - now.getTime())
+    return () => window.clearTimeout(timer)
+  }, [market, loading, data, autoGreyMarketDate])
 
   const loadAShareData = async (refresh = false) => {
     setAShareLoading(true)
@@ -623,22 +774,50 @@ export default function App() {
       >{tab.label}</button>)}
     </div>
     {market === 'hk' ? <>
-      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><div className="title-actions"><button className={refreshingData ? 'secondary progress-button running' : 'secondary progress-button'} style={{ '--progress': `${refreshProgress}%` } as CSSProperties} onClick={refreshData} disabled={refreshingData}><RefreshCw size={16}/>{refreshingData ? `刷新中 ${refreshProgress}%` : '刷新数据'}</button><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div></div>
-      {error && <div className="alert">{error}</div>}
-      {loading && <div className="empty">正在加载最新数据...</div>}
-      {!loading && !error && <>
-        <Insights data={data} onOpen={setSelected} />
-        <FundingConflict data={data} />
-        <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => window.location.reload()}><RefreshCw size={16}/>重置</button><button className="secondary history-button" onClick={() => setIPOHistoryOpen(true)}><Archive size={16}/>历史记录<span>{expiredData.length}</span></button></div>
-        <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
-        {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
+      {hkStage === 'subscribing' ? <>
+        <div className="hk-stage-tabs" role="tablist" aria-label="港股 IPO 阶段">
+          {HK_STAGE_TABS.map(tab => <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={hkStage === tab.key}
+            className={hkStage === tab.key ? 'active' : ''}
+            onClick={() => setHKStage(tab.key)}
+          >{tab.label}</button>)}
+        </div>
+        <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><div className="title-actions"><button className={refreshingData ? 'secondary progress-button running' : 'secondary progress-button'} style={{ '--progress': `${refreshProgress}%` } as CSSProperties} onClick={refreshData} disabled={refreshingData}><RefreshCw size={16}/>{refreshingData ? `刷新中 ${refreshProgress}%` : '刷新数据'}</button><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div></div>
+        {error && <div className="alert">{error}</div>}
+        {loading && <div className="empty">正在加载最新数据...</div>}
+        {!loading && !error && <>
+          <Insights data={data} onOpen={setSelected} />
+          <FundingConflict data={data} />
+          <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => window.location.reload()}><RefreshCw size={16}/>重置</button><button className="secondary history-button" onClick={() => setIPOHistoryOpen(true)}><Archive size={16}/>历史记录<span>{expiredData.length}</span></button></div>
+          <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
+          {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
+        </>}
+      </> : <>
+        <div className="hk-stage-tabs" role="tablist" aria-label="港股 IPO 阶段">
+          {HK_STAGE_TABS.map(tab => <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={hkStage === tab.key}
+            className={hkStage === tab.key ? 'active' : ''}
+            onClick={() => setHKStage(tab.key)}
+          >{tab.label}</button>)}
+        </div>
+        <section className="empty filed-empty">
+          <h2>已递表</h2>
+          <p>暂无已递表项目数据。</p>
+        </section>
       </>}
     </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} onOpenHistory={openHistory} /> : <USMarketDashboardView data={usMarketData} loading={usMarketLoading} error={usMarketError} onRefresh={() => loadUSMarketData(true)} />}
     <DetailDrawer item={selected} onClose={() => setSelected(null)} />
     {ipoHistoryOpen && <IPOHistoryModal items={expiredData} referenceDate={historyReferenceDate} onOpen={(item) => {
       setSelected(item)
-    }} onClose={() => setIPOHistoryOpen(false)} />}
+    }} onClose={() => setIPOHistoryOpen(false)} onSaveGreyMarket={saveGreyMarketQuote} onFinalizeGreyMarket={finalizeGreyMarketQuote} greyMarketLoadingIds={greyMarketLoadingIds} />}
     {historyOpen && <SentimentHistoryModal points={historyPoints} loading={historyLoading} error={historyError} onClose={() => setHistoryOpen(false)} />}
+    {toastMessage && <div className="toast" role="status" aria-live="polite">{toastMessage}</div>}
     <footer>免责声明：数据来自本地招股书及结构化资料，仅供研究参考，不构成任何投资建议。投资有风险，入市需谨慎。</footer>
   </main>
 }
