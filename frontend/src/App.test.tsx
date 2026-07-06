@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -63,11 +63,67 @@ describe('App', () => {
 
     render(<App />)
 
+    expect(screen.getByRole('tab', { name: '港股' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '美股' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'A股' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByText('正在加载最新数据...')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText(/1 只真实 IPO/)).toBeInTheDocument())
     expect(screen.getAllByText('普源精电').length).toBeGreaterThan(0)
     expect(screen.getByText(/数据截至 2026-07-03 14:39/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /生成今日日报/ })).toBeInTheDocument()
+  })
+
+  it('keeps US empty and renders the A-share sentiment page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ipos?active=true')) {
+        return Response.json({ items: [{ ...ipo, dimensions: undefined, risks: undefined, metrics: undefined, adjustments: undefined }], total: 1, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
+      }
+      if (url.endsWith('/ipos/1')) return Response.json(ipo)
+      if (url.endsWith('/reports')) return Response.json([{ id: 1, report_date: '2026-07-03', version: 1, created_at: '2026-07-03T14:39:47', item_count: 1, buy_count: 1, hold_count: 0, avoid_count: 0 }])
+      if (url.endsWith('/a-shares/sentiment')) return Response.json({
+        record_date: '2026-07-06',
+        generated_at: '2026-07-06T09:40:00+08:00',
+        average_price: 18.32,
+        average_change_pct: 0.76,
+        stock_count: 5535,
+        up_count: 3300,
+        down_count: 1800,
+        flat_count: 435,
+        sentiment_score: 67,
+        sentiment_label: '回暖',
+        market_source: '东方财富行情快照',
+        hot_word_sources: ['东方财富股吧-上证指数'],
+        sector_source: '东方财富板块行情',
+        market_file: '/tmp/a_share_market_2026-07-06.csv',
+        hot_words_file: '/tmp/a_share_hot_words_2026-07-06.csv',
+        hot_sectors_file: '/tmp/a_share_hot_sectors_2026-07-06.csv',
+        hot_words: [{ word: '反弹', count: 8, sentiment: 'positive', weight: 2 }, { word: '震荡', count: 5, sentiment: 'neutral', weight: 0 }],
+        hot_sectors: [{ code: 'BK1620', name: '钴', price: 1257.3, change_pct: 5.97, turnover_rate: 2.06, amount: 516686880, main_inflow: 55120228, leading_stock: '寒锐钴业', leading_stock_code: '300618', leading_stock_change_pct: 6.75 }],
+        market_sample: [{ code: '000001', name: '平安银行', price: 11.2, change_pct: 1.23, change: 0.14, volume: 100, amount: 200 }],
+      })
+      return Response.json({}, { status: 404 })
+    }))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText(/1 只真实 IPO/)).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: '美股' }))
+    expect(screen.getByRole('tab', { name: '美股' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText('今日 IPO 分析')).not.toBeInTheDocument()
+    expect(screen.queryByText('普源精电')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('美股页面')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'A股' }))
+    expect(screen.getByRole('tab', { name: 'A股' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText('今日 IPO 分析')).not.toBeInTheDocument()
+    expect(screen.queryByText('普源精电')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('A股市场情绪图')).toBeInTheDocument())
+    expect(screen.getByText('67')).toBeInTheDocument()
+    expect(screen.getByText('反弹')).toBeInTheDocument()
+    expect(screen.getByText('热点板块')).toBeInTheDocument()
+    expect(screen.getByText('钴')).toBeInTheDocument()
+    expect(screen.getByText(/a_share_market_2026-07-06.csv/)).toBeInTheDocument()
   })
 
   it('renders each IPO reason with its own recommendation tier', async () => {

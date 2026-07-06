@@ -10,9 +10,16 @@ def test_api_flow(tmp_path, monkeypatch):
     import app.daily_ipo as daily_ipo
     import app.repository as repository
     import app.reporting as reporting
+    import app.a_share_sentiment as a_share_sentiment
     monkeypatch.setattr(database, "DATA_DIR", tmp_path)
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(daily_ipo, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(a_share_sentiment, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(a_share_sentiment, "fetch_market_rows", lambda: ([
+        a_share_sentiment.MarketRow("000001", "平安银行", 11.2, 1.23, 0.14, 100, 200),
+        a_share_sentiment.MarketRow("600000", "浦发银行", 9.8, -0.4, -0.04, 80, 160),
+    ], "测试行情源"))
+    monkeypatch.setattr(a_share_sentiment, "fetch_discussion_titles", lambda: (["反弹 修复 成交活跃", "震荡 谨慎 资金观望"], ["测试热词源"]))
     monkeypatch.setattr(repository, "connect", database.connect)
     monkeypatch.setattr(reporting, "connect", database.connect)
     (tmp_path / "daily_ipo_2026-07-02.csv").write_text(
@@ -69,3 +76,10 @@ def test_api_flow(tmp_path, monkeypatch):
         pdf = client.get(f"/api/reports/{second['id']}/download?format=pdf")
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
+        sentiment = client.get("/api/a-shares/sentiment?record_date=2026-07-02").json()
+        assert sentiment["average_price"] == 10.5
+        assert sentiment["market_source"] == "测试行情源"
+        assert sentiment["hot_word_sources"] == ["测试热词源"]
+        assert "反弹" in [item["word"] for item in sentiment["hot_words"]]
+        assert (tmp_path / "a_share_market_2026-07-02.csv").exists()
+        assert (tmp_path / "a_share_hot_words_2026-07-02.csv").exists()

@@ -100,3 +100,55 @@ class ReportSummary(BaseModel):
 
 class ReportDetail(ReportSummary):
     markdown: str
+
+
+class AShareHotWord(BaseModel):
+    word: str
+    count: int
+    sentiment: Literal["positive", "neutral", "negative"]
+    weight: int
+
+
+class AShareMarketSample(BaseModel):
+    code: str
+    name: str
+    price: float
+    change_pct: float
+    change: float
+    volume: float
+    amount: float
+
+
+class AShareHotSector(BaseModel):
+    code: str
+    name: str
+    price: float
+    change_pct: float
+    turnover_rate: float
+    amount: float
+    main_inflow: float
+    leading_stock: str
+    leading_stock_code: str
+    leading_stock_change_pct: float
+
+
+class AShareSentiment(BaseModel):
+    record_date: date
+    generated_at: datetime
+    average_price: float
+    average_change_pct: float
+    stock_count: int
+    up_count: int
+    down_count: int
+    flat_count: int
+    sentiment_score: int
+    sentiment_label: str
+    market_source: str
+    hot_word_sources: list[str]
+    sector_source: str
+    market_file: str
+    hot_words_file: str
+    hot_sectors_file: str
+    hot_words: list[AShareHotWord]
+    hot_sectors: list[AShareHotSector]
+    market_sample: list[AShareMarketSample]

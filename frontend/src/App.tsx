@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileText, RefreshCw, X } from 'lucide-react'
 import { api } from './api'
-import type { IPODetail, Report } from './types'
+import type { AShareSentiment, IPODetail, Report } from './types'
 
 type Tier = '申购' | '观望' | '回避'
+type Market = 'hk' | 'us' | 'cn'
 
 interface LatestIPO {
   id: number
@@ -35,12 +36,24 @@ interface LatestIPO {
 
 const SCORE_LABELS = ['基石投资者', '基石质量', '绿鞋机制', '公开申购倍数', '估值吸引力', '保荐人']
 const SCORE_WEIGHTS = [1, 1, 1, 3, 3, 1]
+const MARKET_TABS: Array<{ key: Market; label: string }> = [
+  { key: 'hk', label: '港股' },
+  { key: 'us', label: '美股' },
+  { key: 'cn', label: 'A股' },
+]
 
 const money = (value: number | null) => value == null ? '待补充' : `HK$${Math.round(value).toLocaleString('zh-HK')}`
 const numberText = (value: number | null, suffix = '') => value == null ? '待补充' : `${value.toLocaleString('zh-HK')}${suffix}`
 const tierClass = (tier: Tier) => tier === '申购' ? 'buy' : tier === '观望' ? 'hold' : 'avoid'
 const shortDate = (value: string) => value.slice(5)
 const priceText = (low: number, high: number) => low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
+const cnyAmount = (value: number) => {
+  const abs = Math.abs(value)
+  const sign = value < 0 ? '-' : ''
+  if (abs >= 100000000) return `${sign}${(abs / 100000000).toFixed(1)}亿`
+  if (abs >= 10000) return `${sign}${(abs / 10000).toFixed(1)}万`
+  return `${value.toFixed(0)}`
+}
 
 function summaryText(item: IPODetail) {
   const multiple = item.subscription_multiple
@@ -211,7 +224,62 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
   </>
 }
 
+function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentiment | null; loading: boolean; error: string; onRefresh: () => void }) {
+  const maxWordCount = Math.max(1, ...(data?.hot_words.map(word => word.count) ?? [1]))
+  return <section className="cn-market">
+    <div className="page-title"><div><h1>A股市场情绪图</h1><p>按当日平均股价、涨跌家数和评论热词综合估算 · 数据会自动保存到本地 data 目录</p></div><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button></div>
+    {error && <div className="alert">{error}</div>}
+    {loading && <div className="empty">正在抓取 A股行情和市场热词...</div>}
+    {!loading && data && <>
+      <div className="emotion-hero">
+        <div className="emotion-gauge" style={{ ['--score' as string]: `${data.sentiment_score}%` }}>
+          <span>市场情绪</span>
+          <strong>{data.sentiment_score}</strong>
+          <b>{data.sentiment_label}</b>
+        </div>
+        <div className="cn-stats">
+          <div><span>当日平均股价</span><strong>{data.average_price.toFixed(2)}</strong></div>
+          <div><span>平均涨跌幅</span><strong className={data.average_change_pct >= 0 ? 'green' : 'red'}>{data.average_change_pct.toFixed(2)}%</strong></div>
+          <div><span>上涨/下跌</span><strong><i className="green">{data.up_count}</i><small>/</small><i className="red">{data.down_count}</i></strong></div>
+          <div><span>样本股票数</span><strong>{data.stock_count}</strong></div>
+        </div>
+      </div>
+      <div className="emotion-grid">
+        <section className="hot-words">
+          <h3>评论热词</h3>
+          <div>{data.hot_words.map(word => <article key={word.word} className={word.sentiment}>
+            <b>{word.word}</b>
+            <i><em style={{ width: `${Math.max(12, word.count / maxWordCount * 100)}%` }} /></i>
+            <span>{word.count}</span>
+          </article>)}</div>
+        </section>
+        <section className="market-sample">
+          <h3>行情样本</h3>
+          <div>{data.market_sample.slice(0, 10).map(item => <article key={item.code}>
+            <b>{item.name}</b>
+            <span>{item.price.toFixed(2)}</span>
+            <strong className={item.change_pct >= 0 ? 'green' : 'red'}>{item.change_pct.toFixed(2)}%</strong>
+          </article>)}</div>
+        </section>
+      </div>
+      <section className="hot-sectors">
+        <h3>热点板块</h3>
+        <div>{data.hot_sectors.slice(0, 12).map((sector, index) => <article key={sector.code}>
+          <b>{index + 1}</b>
+          <strong>{sector.name}<small>{sector.code}</small></strong>
+          <span className={sector.change_pct >= 0 ? 'green' : 'red'}>{sector.change_pct.toFixed(2)}%</span>
+          <span>成交 {cnyAmount(sector.amount)}</span>
+          <span className={sector.main_inflow >= 0 ? 'green' : 'red'}>主力 {cnyAmount(sector.main_inflow)}</span>
+          <em>领涨 {sector.leading_stock || '待补充'} {sector.leading_stock_change_pct ? `${sector.leading_stock_change_pct.toFixed(2)}%` : ''}</em>
+        </article>)}</div>
+      </section>
+      <p className="data-files">行情：{data.market_file} · 热词：{data.hot_words_file} · 板块：{data.hot_sectors_file} · 来源：{data.market_source} / {data.sector_source} / {data.hot_word_sources.join('、') || 'fallback'}</p>
+    </>}
+  </section>
+}
+
 export default function App() {
+  const [market, setMarket] = useState<Market>('hk')
   const [industry, setIndustry] = useState('')
   const [tier, setTier] = useState('')
   const [selected, setSelected] = useState<LatestIPO | null>(null)
@@ -220,6 +288,9 @@ export default function App() {
   const [error, setError] = useState('')
   const [report, setReport] = useState<Report | null>(null)
   const [data, setData] = useState<LatestIPO[]>([])
+  const [aShareData, setAShareData] = useState<AShareSentiment | null>(null)
+  const [aShareLoading, setAShareLoading] = useState(false)
+  const [aShareError, setAShareError] = useState('')
 
   const loadData = async () => {
     setLoading(true)
@@ -245,6 +316,22 @@ export default function App() {
     void loadData()
   }, [])
 
+  const loadAShareData = async () => {
+    setAShareLoading(true)
+    setAShareError('')
+    try {
+      setAShareData(await api.aShareSentiment())
+    } catch (e) {
+      setAShareError(e instanceof Error ? e.message : 'A股情绪数据加载失败')
+    } finally {
+      setAShareLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (market === 'cn' && !aShareData && !aShareLoading) void loadAShareData()
+  }, [market])
+
   const industries = useMemo(() => [...new Set(data.map(item => item.industry))].sort(), [data])
   const visible = data.filter(item => (!industry || item.industry === industry) && (!tier || item.tier === tier))
   const createReport = async () => {
@@ -263,16 +350,31 @@ export default function App() {
   }
 
   return <main className="page">
-    <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div>
-    {error && <div className="alert">{error}</div>}
-    {loading && <div className="empty">正在加载最新数据...</div>}
-    {!loading && !error && <>
-      <Insights data={data} onOpen={setSelected} />
-      <FundingConflict data={data} />
-      <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => { setIndustry(''); setTier('') }}><RefreshCw size={16}/>重置</button></div>
-      <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
-      {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
-    </>}
+    <div className="market-tabs" role="tablist" aria-label="市场">
+      {MARKET_TABS.map(tab => <button
+        key={tab.key}
+        type="button"
+        role="tab"
+        aria-selected={market === tab.key}
+        className={market === tab.key ? 'active' : ''}
+        onClick={() => {
+          setMarket(tab.key)
+          setSelected(null)
+        }}
+      >{tab.label}</button>)}
+    </div>
+    {market === 'hk' ? <>
+      <div className="page-title"><div><h1>今日 IPO 分析</h1><p>{data.length || 0} 只真实 IPO · 透明评分 · 数据截至 {formatTimestamp(report)}</p></div><button className="primary" onClick={createReport} disabled={generating}><FileText size={18}/>{generating ? '生成中...' : '生成今日日报'}</button></div>
+      {error && <div className="alert">{error}</div>}
+      {loading && <div className="empty">正在加载最新数据...</div>}
+      {!loading && !error && <>
+        <Insights data={data} onOpen={setSelected} />
+        <FundingConflict data={data} />
+        <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => { setIndustry(''); setTier('') }}><RefreshCw size={16}/>重置</button></div>
+        <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
+        {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
+      </>}
+    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={loadAShareData} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
     <DetailDrawer item={selected} onClose={() => setSelected(null)} />
     <footer>免责声明：数据来自本地招股书及结构化资料，仅供研究参考，不构成任何投资建议。投资有风险，入市需谨慎。</footer>
   </main>

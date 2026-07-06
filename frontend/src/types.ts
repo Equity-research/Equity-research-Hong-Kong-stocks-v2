@@ -15,3 +15,38 @@ export interface AllotmentDifficulty { label: string; companies: string[]; note:
 export interface ReportInsights { fundamental_valuation_ranking: string[][]; allotment_difficulty: AllotmentDifficulty[] }
 export interface IPOList { items: IPO[]; total: number; page: number; page_size: number; insights: ReportInsights }
 export interface Report { id: number; report_date: string; version: number; created_at: string; item_count: number; buy_count: number; hold_count: number; avoid_count: number; markdown?: string }
+export interface AShareHotWord { word: string; count: number; sentiment: 'positive' | 'neutral' | 'negative'; weight: number }
+export interface AShareMarketSample { code: string; name: string; price: number; change_pct: number; change: number; volume: number; amount: number }
+export interface AShareHotSector {
+  code: string
+  name: string
+  price: number
+  change_pct: number
+  turnover_rate: number
+  amount: number
+  main_inflow: number
+  leading_stock: string
+  leading_stock_code: string
+  leading_stock_change_pct: number
+}
+export interface AShareSentiment {
+  record_date: string
+  generated_at: string
+  average_price: number
+  average_change_pct: number
+  stock_count: number
+  up_count: number
+  down_count: number
+  flat_count: number
+  sentiment_score: number
+  sentiment_label: string
+  market_source: string
+  hot_word_sources: string[]
+  sector_source: string
+  market_file: string
+  hot_words_file: string
+  hot_sectors_file: string
+  hot_words: AShareHotWord[]
+  hot_sectors: AShareHotSector[]
+  market_sample: AShareMarketSample[]
+}
