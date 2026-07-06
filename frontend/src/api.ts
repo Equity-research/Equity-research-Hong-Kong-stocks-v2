@@ -1,18 +1,38 @@
 import type { AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, GreyMarketQuote, IPODetail, IPOList, Report, USMarketDashboard } from './types'
 
 const API = import.meta.env.VITE_API_URL ?? '/api'
+const REQUEST_TIMEOUT_MS = 20_000
+const GET_RETRY_COUNT = 2
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
   if (options?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await fetch(`${API}${path}`, { ...options, headers })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: '请求失败' }))
-    throw new Error(typeof body.detail === 'string' ? body.detail : '请求失败')
+  const method = options?.method?.toUpperCase() ?? 'GET'
+  const attempts = method === 'GET' ? GET_RETRY_COUNT + 1 : 1
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${API}${path}`, { ...options, headers, signal: controller.signal })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ detail: '请求失败' }))
+        throw new Error(typeof body.detail === 'string' ? body.detail : '请求失败')
+      }
+      return response.json() as Promise<T>
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts - 1) {
+        break
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 600 * (attempt + 1)))
+    } finally {
+      window.clearTimeout(timeout)
+    }
   }
-  return response.json() as Promise<T>
+  throw lastError
 }
 
 export const api = {
