@@ -128,22 +128,28 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
     market_source = "本地最近行情CSV"
     sector_source = "本地最近板块CSV"
     title_sources = ["本地最近热词CSV"]
+    loaded_from_cache = False
+    fetched_external = False
 
     if not refresh:
         market_rows = load_latest_market_rows(record_date)
         hot_words = load_latest_hot_words(record_date)
         hot_sectors = load_latest_hot_sectors(record_date)
+        loaded_from_cache = bool(market_rows or hot_words or hot_sectors)
 
     if refresh or not market_rows:
         market_rows, market_source = fetch_market_rows()
+        fetched_external = fetched_external or bool(market_rows)
     if refresh or not hot_sectors:
         hot_sectors, sector_source = fetch_hot_sectors()
+        fetched_external = fetched_external or bool(hot_sectors)
     if refresh or not hot_words:
         titles, title_sources = fetch_discussion_titles()
         if not titles:
             titles = FALLBACK_TITLES
             title_sources = ["fallback"]
         hot_words = extract_hot_words(titles)
+        fetched_external = fetched_external or title_sources != ["fallback"]
 
     if not market_rows:
         market_rows = load_latest_market_rows(record_date)
@@ -158,9 +164,16 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
         title_sources = ["fallback"]
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    market_file = write_market_rows(record_date, generated_at, market_rows, market_source)
-    hot_words_file = write_hot_words(record_date, generated_at, hot_words, title_sources)
-    hot_sectors_file = write_hot_sectors(record_date, generated_at, hot_sectors, sector_source)
+    should_write_files = refresh or fetched_external or not loaded_from_cache
+    if should_write_files:
+        market_file = write_market_rows(record_date, generated_at, market_rows, market_source)
+        hot_words_file = write_hot_words(record_date, generated_at, hot_words, title_sources)
+        hot_sectors_file = write_hot_sectors(record_date, generated_at, hot_sectors, sector_source)
+    else:
+        generated_at = latest_generated_at(record_date) or generated_at
+        market_file = latest_data_path("a_share_market_", record_date) or market_path(record_date)
+        hot_words_file = latest_data_path("a_share_hot_words_", record_date) or hot_words_path(record_date)
+        hot_sectors_file = latest_data_path("a_share_hot_sectors_", record_date) or hot_sectors_path(record_date)
     priced_rows = [row for row in market_rows if row.price > 0]
     average_price = round(sum(row.price for row in priced_rows) / max(1, len(priced_rows)), 2)
     average_change_pct = round(sum(row.change_pct for row in market_rows) / len(market_rows), 2)
@@ -363,6 +376,19 @@ def latest_data_path(prefix: str, record_date: date) -> Path | None:
         if candidate_date <= record_date:
             candidates.append((candidate_date, path))
     return max(candidates, default=(None, None))[1]
+
+
+def latest_generated_at(record_date: date) -> str | None:
+    values = []
+    for prefix in ("a_share_market_", "a_share_hot_words_", "a_share_hot_sectors_"):
+        path = latest_data_path(prefix, record_date)
+        if not path:
+            continue
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            row = next(csv.DictReader(handle), None)
+            if row and row.get("generated_at"):
+                values.append(row["generated_at"])
+    return max(values, default=None)
 
 
 def fetch_hot_sectors() -> tuple[list[HotSector], str]:
