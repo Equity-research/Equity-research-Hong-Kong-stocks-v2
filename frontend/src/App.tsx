@@ -229,7 +229,7 @@ function AShareEmotion({ data, loading, error, onRefresh }: { data: AShareSentim
   return <section className="cn-market">
     <div className="page-title"><div><h1>A股市场情绪图</h1><p>按当日平均股价、涨跌家数和评论热词综合估算 · 数据会自动保存到本地 data 目录</p></div><button className="secondary" onClick={onRefresh} disabled={loading}><RefreshCw size={16}/>{loading ? '刷新中...' : '刷新数据'}</button></div>
     {error && <div className="alert">{error}</div>}
-    {loading && <div className="empty">正在抓取 A股行情和市场热词...</div>}
+    {loading && <div className="empty">正在读取 A股行情、热词和板块数据...</div>}
     {!loading && data && <>
       <div className="emotion-hero">
         <div className="emotion-gauge" style={{ ['--score' as string]: `${data.sentiment_score}%` }}>
@@ -316,11 +316,11 @@ export default function App() {
     void loadData()
   }, [])
 
-  const loadAShareData = async () => {
+  const loadAShareData = async (refresh = false) => {
     setAShareLoading(true)
     setAShareError('')
     try {
-      setAShareData(await api.aShareSentiment())
+      setAShareData(await api.aShareSentiment(refresh))
     } catch (e) {
       setAShareError(e instanceof Error ? e.message : 'A股情绪数据加载失败')
     } finally {
@@ -329,7 +329,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (market === 'cn' && !aShareData && !aShareLoading) void loadAShareData()
+    if (market === 'cn' && !aShareData && !aShareLoading) void loadAShareData(false)
   }, [market])
 
   const industries = useMemo(() => [...new Set(data.map(item => item.industry))].sort(), [data])
@@ -374,7 +374,7 @@ export default function App() {
         <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
         {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
       </>}
-    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={loadAShareData} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
+    </> : market === 'cn' ? <AShareEmotion data={aShareData} loading={aShareLoading} error={aShareError} onRefresh={() => loadAShareData(true)} /> : <section className="blank-market" aria-label={`${MARKET_TABS.find(tab => tab.key === market)?.label}页面`} />}
     <DetailDrawer item={selected} onClose={() => setSelected(null)} />
     <footer>免责声明：数据来自本地招股书及结构化资料，仅供研究参考，不构成任何投资建议。投资有风险，入市需谨慎。</footer>
   </main>

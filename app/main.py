@@ -63,8 +63,8 @@ def scoring_rules():
 
 
 @app.get("/api/a-shares/sentiment", response_model=AShareSentiment)
-def a_share_sentiment(record_date: date | None = None):
-    return build_a_share_sentiment(record_date)
+def a_share_sentiment(record_date: date | None = None, refresh: bool = False):
+    return build_a_share_sentiment(record_date, refresh)
 
 
 @app.post("/api/reports", response_model=ReportDetail, status_code=201)

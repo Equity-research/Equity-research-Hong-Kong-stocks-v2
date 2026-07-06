@@ -118,22 +118,44 @@ def hot_sectors_path(record_date: date) -> Path:
     return DATA_DIR / f"a_share_hot_sectors_{record_date.isoformat()}.csv"
 
 
-def build_a_share_sentiment(record_date: date | None = None) -> dict:
+def build_a_share_sentiment(record_date: date | None = None, refresh: bool = False) -> dict:
     record_date = record_date or datetime.now(CN_TZ).date()
     generated_at = datetime.now(CN_TZ).isoformat(timespec="seconds")
-    market_rows, market_source = fetch_market_rows()
-    hot_sectors, sector_source = fetch_hot_sectors()
-    titles, title_sources = fetch_discussion_titles()
+    market_rows: list[MarketRow] = []
+    hot_sectors: list[HotSector] = []
+    hot_words: list[HotWord] = []
+    market_source = "本地最近行情CSV"
+    sector_source = "本地最近板块CSV"
+    title_sources = ["本地最近热词CSV"]
+
+    if not refresh:
+        market_rows = load_latest_market_rows(record_date)
+        hot_words = load_latest_hot_words(record_date)
+        hot_sectors = load_latest_hot_sectors(record_date)
+
+    if refresh or not market_rows:
+        market_rows, market_source = fetch_market_rows()
+    if refresh or not hot_sectors:
+        hot_sectors, sector_source = fetch_hot_sectors()
+    if refresh or not hot_words:
+        titles, title_sources = fetch_discussion_titles()
+        if not titles:
+            titles = FALLBACK_TITLES
+            title_sources = ["fallback"]
+        hot_words = extract_hot_words(titles)
+
     if not market_rows:
         market_rows = load_latest_market_rows(record_date)
         market_source = "本地最近行情CSV" if market_rows else "fallback"
+    if not hot_sectors:
+        hot_sectors = load_latest_hot_sectors(record_date)
+        sector_source = "本地最近板块CSV" if hot_sectors else "fallback"
     if not market_rows:
         market_rows = [MarketRow(**row) for row in FALLBACK_MARKET]
-    if not titles:
-        titles = FALLBACK_TITLES
+    if not hot_words:
+        hot_words = extract_hot_words(FALLBACK_TITLES)
         title_sources = ["fallback"]
 
-    hot_words = extract_hot_words(titles)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     market_file = write_market_rows(record_date, generated_at, market_rows, market_source)
     hot_words_file = write_hot_words(record_date, generated_at, hot_words, title_sources)
@@ -214,15 +236,7 @@ def market_row_from_item(item: dict) -> MarketRow | None:
 
 
 def load_latest_market_rows(record_date: date) -> list[MarketRow]:
-    candidates = []
-    for path in DATA_DIR.glob("a_share_market_*.csv"):
-        try:
-            candidate_date = date.fromisoformat(path.stem.removeprefix("a_share_market_"))
-        except ValueError:
-            continue
-        if candidate_date <= record_date:
-            candidates.append((candidate_date, path))
-    latest = max(candidates, default=(None, None))[1]
+    latest = latest_data_path("a_share_market_", record_date)
     if not latest:
         return []
     with latest.open(encoding="utf-8-sig", newline="") as handle:
@@ -240,6 +254,59 @@ def load_latest_market_rows(record_date: date) -> list[MarketRow]:
             if market_row.price > 0:
                 rows.append(market_row)
         return rows
+
+
+def load_latest_hot_words(record_date: date) -> list[HotWord]:
+    latest = latest_data_path("a_share_hot_words_", record_date)
+    if not latest:
+        return []
+    with latest.open(encoding="utf-8-sig", newline="") as handle:
+        return [
+            HotWord(
+                word=row.get("word", ""),
+                count=int(parse_float(row.get("count")) or 0),
+                sentiment=row.get("sentiment", "neutral"),
+                weight=int(parse_float(row.get("weight")) or 0),
+            )
+            for row in csv.DictReader(handle)
+            if row.get("word")
+        ]
+
+
+def load_latest_hot_sectors(record_date: date) -> list[HotSector]:
+    latest = latest_data_path("a_share_hot_sectors_", record_date)
+    if not latest:
+        return []
+    with latest.open(encoding="utf-8-sig", newline="") as handle:
+        sectors = []
+        for row in csv.DictReader(handle):
+            sector = HotSector(
+                code=row.get("code", ""),
+                name=row.get("name", ""),
+                price=parse_float(row.get("price")) or 0.0,
+                change_pct=parse_float(row.get("change_pct")) or 0.0,
+                turnover_rate=parse_float(row.get("turnover_rate")) or 0.0,
+                amount=parse_float(row.get("amount")) or 0.0,
+                main_inflow=parse_float(row.get("main_inflow")) or 0.0,
+                leading_stock=row.get("leading_stock", ""),
+                leading_stock_code=row.get("leading_stock_code", ""),
+                leading_stock_change_pct=parse_float(row.get("leading_stock_change_pct")) or 0.0,
+            )
+            if sector.code and sector.name:
+                sectors.append(sector)
+        return sectors
+
+
+def latest_data_path(prefix: str, record_date: date) -> Path | None:
+    candidates = []
+    for path in DATA_DIR.glob(f"{prefix}*.csv"):
+        try:
+            candidate_date = date.fromisoformat(path.stem.removeprefix(prefix))
+        except ValueError:
+            continue
+        if candidate_date <= record_date:
+            candidates.append((candidate_date, path))
+    return max(candidates, default=(None, None))[1]
 
 
 def fetch_hot_sectors() -> tuple[list[HotSector], str]:

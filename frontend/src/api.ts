@@ -17,7 +17,7 @@ export const api = {
   adjust: (id: number, value: number, reason: string) => request(`/ipos/${id}/adjustments`, { method: 'POST', body: JSON.stringify({ value, reason, operator: '本地用户' }) }),
   reports: () => request<Report[]>('/reports'),
   createReport: () => request<Report>('/reports', { method: 'POST' }),
-  aShareSentiment: () => request<AShareSentiment>('/a-shares/sentiment'),
+  aShareSentiment: (refresh = false) => request<AShareSentiment>(`/a-shares/sentiment${refresh ? '?refresh=true' : ''}`),
   rules: () => request<Record<string, unknown>>('/scoring-rules'),
   downloadUrl: (id: number, format: 'md' | 'pdf') => `${API}/reports/${id}/download?format=${format}`,
 }
