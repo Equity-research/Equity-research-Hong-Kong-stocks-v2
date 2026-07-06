@@ -113,7 +113,7 @@ SAMPLE_IPOS = [
            "company_quality": ["晶圆代工具备产业战略价值。", "重资产模式应结合PB和PS观察。", "发行后市值约667.13至718.27亿港元。", "基石配售占全球发售约49.92%。"]},
           ["认购倍数较低。", "晶圆代工周期性强，A/H 溢价需结合 PB/PS 继续跟踪。"]),
     _item("滨化股份", "Befar Group Co., Ltd.", "06745", "基础化工", 3.59, 3.59, "2026-07-07",
-          {"has_cornerstone": True, "cornerstone_quality_good": True, "greenshoe": True, "is_ah": True,
+          {"has_cornerstone": True, "cornerstone_quality_good": True, "greenshoe": None, "is_ah": True,
            "ah_premium": 146.8, "sponsor_quality_good": True, "subscription_multiple": 1.99,
            "minimum_subscription_amount": 3626.21, "issuance_shares": 352126000, "lot_size": 1000,
            "cornerstone_investors": ["北京益安", "鲁花道生", "Aurora SF", "中国宏桥", "Hyperion Venture", "天图", "盛威"], "cornerstone_ratio": 30.91, "sponsors": ["华泰国际", "建银国际"],

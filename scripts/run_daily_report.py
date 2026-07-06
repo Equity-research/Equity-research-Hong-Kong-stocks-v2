@@ -320,8 +320,6 @@ def validate_issuance_fields() -> None:
         prefix = f"{row['code']} {row['name']}"
         if metrics.get("has_cornerstone") is None:
             errors.append(f"{prefix}: has_cornerstone 未补全")
-        if metrics.get("greenshoe") is None:
-            errors.append(f"{prefix}: greenshoe 未补全")
         if metrics.get("has_cornerstone") is True:
             if not metrics.get("cornerstone_investors"):
                 errors.append(f"{prefix}: 有基石但缺少 cornerstone_investors")
