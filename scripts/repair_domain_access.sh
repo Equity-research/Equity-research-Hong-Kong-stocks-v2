@@ -16,6 +16,24 @@ else
   SUDO="sudo"
 fi
 
+disable_duplicate_nginx_sites() {
+  local target_available target_enabled resolved_target file resolved_file
+  target_available="/etc/nginx/sites-available/${NGINX_SITE}"
+  target_enabled="/etc/nginx/sites-enabled/${NGINX_SITE}"
+  resolved_target="$(readlink -f "$target_available" 2>/dev/null || true)"
+
+  echo "==> Disable duplicate nginx sites for ${DOMAIN}"
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    resolved_file="$(readlink -f "$file" 2>/dev/null || true)"
+    if [ "$file" = "$target_enabled" ] || { [ -n "$resolved_file" ] && [ "$resolved_file" = "$resolved_target" ]; }; then
+      continue
+    fi
+    echo "Disabling duplicate nginx config: ${file}"
+    $SUDO rm -f "$file"
+  done < <(grep -RslE "server_name .*(${DOMAIN}|${WWW_DOMAIN})" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true)
+}
+
 echo "==> App dir: ${APP_DIR}"
 echo "==> Domain: ${DOMAIN} ${WWW_DOMAIN}"
 
@@ -180,14 +198,15 @@ $SUDO ln -sf "/etc/nginx/sites-available/${NGINX_SITE}" "/etc/nginx/sites-enable
 if [ -e /etc/nginx/sites-enabled/default ]; then
   $SUDO rm -f /etc/nginx/sites-enabled/default
 fi
+disable_duplicate_nginx_sites
 
 echo "==> 4. Test and restart nginx"
 $SUDO nginx -t
 $SUDO systemctl restart nginx
 
 echo "==> 5. Verify local nginx"
-curl --connect-timeout 5 --max-time 15 -I "http://127.0.0.1/" || true
-curl --connect-timeout 5 --max-time 15 -fsS "http://127.0.0.1/api/health" || true
+curl --connect-timeout 5 --max-time 15 -I -H "Host: ${WWW_DOMAIN}" "http://127.0.0.1/" || true
+curl --connect-timeout 5 --max-time 15 -fsS -H "Host: ${WWW_DOMAIN}" "http://127.0.0.1/api/health" || true
 echo
 
 echo "==> 6. Listening ports"
