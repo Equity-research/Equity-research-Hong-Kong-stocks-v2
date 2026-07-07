@@ -10,6 +10,10 @@ WAIT_SECONDS="${WAIT_SECONDS:-0}"
 APP_USER="${APP_USER:-}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-10}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-180}"
+GIT_COMMAND_TIMEOUT="${GIT_COMMAND_TIMEOUT:-90}"
+GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=2}"
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND
 
 service_user() {
   local configured_user pid_user pid
@@ -44,6 +48,19 @@ curl_json_to_file() {
   fi
 }
 
+run_timed() {
+  local label="$1"
+  local seconds="$2"
+  shift 2
+
+  echo "${label} (timeout ${seconds}s)"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --preserve-status "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
 echo "==> Run date: ${REPORT_DATE}"
 echo "==> App dir: ${APP_DIR}"
 echo "==> Branch: ${BRANCH}"
@@ -61,17 +78,20 @@ if [ "$(id -u)" = "0" ]; then
   git config --system --add safe.directory "$APP_DIR" 2>/dev/null || true
 fi
 
-git fetch origin "$BRANCH"
-
 STASH_CREATED=0
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Local changes detected; stashing before updating ${BRANCH}."
-  git stash push --include-untracked -m "data-job-autostash ${REPORT_DATE} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  STASH_CREATED=1
-fi
+if run_timed "Fetching origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git fetch origin "$BRANCH"; then
+  echo "Checking local changes before pulling ${BRANCH}."
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "Local changes detected; stashing before updating ${BRANCH}."
+    run_timed "Stashing local changes" "$GIT_COMMAND_TIMEOUT" git stash push --include-untracked -m "data-job-autostash ${REPORT_DATE} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STASH_CREATED=1
+  fi
 
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
+  run_timed "Checking out ${BRANCH}" "$GIT_COMMAND_TIMEOUT" git checkout "$BRANCH"
+  run_timed "Pulling origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git pull --ff-only origin "$BRANCH"
+else
+  echo "WARNING: git fetch origin/${BRANCH} failed or timed out after ${GIT_COMMAND_TIMEOUT}s; continuing with existing local checkout."
+fi
 
 if [ "$STASH_CREATED" = "1" ]; then
   echo "Previous local changes were preserved in git stash."
