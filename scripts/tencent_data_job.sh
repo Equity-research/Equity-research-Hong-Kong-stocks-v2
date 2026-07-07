@@ -8,6 +8,8 @@ BRANCH="${BRANCH:-main}"
 REPORT_DATE="${1:-$(TZ=Asia/Shanghai date +%F)}"
 WAIT_SECONDS="${WAIT_SECONDS:-0}"
 APP_USER="${APP_USER:-}"
+CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-10}"
+CURL_MAX_TIME="${CURL_MAX_TIME:-180}"
 
 service_user() {
   local configured_user pid_user pid
@@ -25,6 +27,20 @@ service_user() {
     fi
   fi
   id -un
+}
+
+curl_json_to_file() {
+  local label="$1"
+  local url="$2"
+  local output_path="$3"
+
+  if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$url" >"$output_path"; then
+    echo "${label} saved to ${output_path}"
+  else
+    local status=$?
+    echo "WARNING: ${label} failed or timed out after ${CURL_MAX_TIME}s, continuing. curl exit=${status}"
+    rm -f "$output_path"
+  fi
 }
 
 echo "==> Run date: ${REPORT_DATE}"
@@ -94,18 +110,20 @@ systemctl restart "$SERVICE_NAME"
 
 echo "==> 7. Wait for API"
 sleep 3
-curl -fsS "http://127.0.0.1:${PORT}/api/health"
+curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time 30 -fsS "http://127.0.0.1:${PORT}/api/health"
 echo
 
 echo "==> 8. Run A-share sentiment data"
-curl -fsS "http://127.0.0.1:${PORT}/api/a-shares/sentiment?record_date=${REPORT_DATE}&refresh=true" \
-  >"/tmp/a_share_sentiment_${REPORT_DATE}.json"
-echo "A-share sentiment saved to /tmp/a_share_sentiment_${REPORT_DATE}.json"
+curl_json_to_file \
+  "A-share sentiment" \
+  "http://127.0.0.1:${PORT}/api/a-shares/sentiment?record_date=${REPORT_DATE}&refresh=true" \
+  "/tmp/a_share_sentiment_${REPORT_DATE}.json"
 
 echo "==> 9. Run US market data"
-curl -fsS "http://127.0.0.1:${PORT}/api/us-market/dashboard?record_date=${REPORT_DATE}&refresh=true" \
-  >"/tmp/us_market_${REPORT_DATE}.json"
-echo "US market dashboard saved to /tmp/us_market_${REPORT_DATE}.json"
+curl_json_to_file \
+  "US market dashboard" \
+  "http://127.0.0.1:${PORT}/api/us-market/dashboard?record_date=${REPORT_DATE}&refresh=true" \
+  "/tmp/us_market_${REPORT_DATE}.json"
 
 echo "==> 10. Verify generated files"
 echo "--- HK IPO files ---"
@@ -125,7 +143,7 @@ ls -lh \
   "data/us_market_news_${REPORT_DATE}.json" 2>/dev/null || true
 
 echo "--- Reports API ---"
-curl -fsS "http://127.0.0.1:${PORT}/api/reports"
+curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time 30 -fsS "http://127.0.0.1:${PORT}/api/reports"
 echo
 
 echo "==> 11. Service status"
