@@ -13,8 +13,20 @@ fi
 cd "$APP_DIR"
 
 git fetch origin "$BRANCH"
+
+STASH_CREATED=0
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Local changes detected; stashing before updating ${BRANCH}."
+  git stash push --include-untracked -m "deploy-autostash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  STASH_CREATED=1
+fi
+
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
+
+if [ "$STASH_CREATED" = "1" ]; then
+  echo "Previous local changes were preserved in git stash."
+fi
 
 if [ ! -d .venv ]; then
   python3 -m venv .venv
