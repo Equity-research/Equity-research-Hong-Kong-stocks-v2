@@ -6,11 +6,20 @@ Install on the server:
 
 ```bash
 cd /opt/stock
+sudo cp deploy/systemd/stock-api.service /etc/systemd/system/
 chmod +x scripts/tencent_data_job.sh
 sudo cp deploy/systemd/stock-data-job.service /etc/systemd/system/
 sudo cp deploy/systemd/stock-data-job.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable --now stock-api.service
 sudo systemctl enable --now stock-data-job.timer
+```
+
+Check the API:
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/health
+systemctl status stock-api.service --no-pager
 ```
 
 Check schedule and logs:
