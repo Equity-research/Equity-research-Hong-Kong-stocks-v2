@@ -34,6 +34,7 @@ curl_json_to_file() {
   local url="$2"
   local output_path="$3"
 
+  echo "Requesting ${label}; max ${CURL_MAX_TIME}s: ${url}"
   if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$url" >"$output_path"; then
     echo "${label} saved to ${output_path}"
   else

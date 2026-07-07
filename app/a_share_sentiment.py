@@ -1,6 +1,8 @@
 import csv
+import os
 import re
 import sqlite3
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -25,6 +27,11 @@ MARKET_PARAMS = (
     "&fltt=2&invt=2&fid=f2&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
     "&fields=f12,f14,f2,f3,f4,f5,f6"
 )
+HTTP_TIMEOUT_SECONDS = float(os.getenv("A_SHARE_HTTP_TIMEOUT_SECONDS", "5"))
+MARKET_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_MARKET_FETCH_BUDGET_SECONDS", "60"))
+SECTOR_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_SECTOR_FETCH_BUDGET_SECONDS", "20"))
+DISCUSSION_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_DISCUSSION_FETCH_BUDGET_SECONDS", "40"))
+MARKET_MAX_PAGES = int(os.getenv("A_SHARE_MARKET_MAX_PAGES", "80"))
 DISCUSSION_URLS = [
     ("东方财富股吧-上证指数", "https://guba.eastmoney.com/list,zssh000001.html"),
     ("东方财富股吧-深证成指", "https://guba.eastmoney.com/list,zssz399001.html"),
@@ -86,6 +93,23 @@ TOKEN_STOP_PARTS = {
     "责任编辑",
     "app下载",
 }
+
+
+def fetch_deadline(seconds: float) -> float:
+    return time.monotonic() + seconds
+
+
+def remaining_seconds(deadline: float) -> float:
+    return deadline - time.monotonic()
+
+
+def bounded_timeout(deadline: float) -> httpx.Timeout:
+    remaining = remaining_seconds(deadline)
+    if remaining <= 0:
+        raise TimeoutError("A-share data fetch budget exhausted")
+    timeout = max(0.5, min(HTTP_TIMEOUT_SECONDS, remaining))
+    connect_timeout = max(0.5, min(3.0, timeout))
+    return httpx.Timeout(timeout, connect=connect_timeout)
 
 
 @dataclass(frozen=True)
@@ -275,13 +299,16 @@ def ensure_history_table() -> None:
 
 def fetch_market_rows() -> tuple[list[MarketRow], str]:
     headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+    deadline = fetch_deadline(MARKET_FETCH_BUDGET_SECONDS)
     for base_url in MARKET_URLS:
+        if remaining_seconds(deadline) <= 0:
+            break
         rows: list[MarketRow] = []
         seen: set[str] = set()
         try:
-            with httpx.Client(timeout=12, follow_redirects=True, headers=headers) as client:
-                for page in range(1, 80):
-                    response = client.get(f"{base_url}?pn={page}&pz=100&{MARKET_PARAMS}")
+            with httpx.Client(follow_redirects=True, headers=headers) as client:
+                for page in range(1, MARKET_MAX_PAGES + 1):
+                    response = client.get(f"{base_url}?pn={page}&pz=100&{MARKET_PARAMS}", timeout=bounded_timeout(deadline))
                     response.raise_for_status()
                     payload = response.json()
                     data = payload.get("data") or {}
@@ -407,10 +434,13 @@ def latest_generated_at(record_date: date) -> str | None:
 
 def fetch_hot_sectors() -> tuple[list[HotSector], str]:
     headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/center/boardlist.html"}
+    deadline = fetch_deadline(SECTOR_FETCH_BUDGET_SECONDS)
     for base_url in MARKET_URLS:
+        if remaining_seconds(deadline) <= 0:
+            break
         try:
-            with httpx.Client(timeout=12, follow_redirects=True, headers=headers) as client:
-                response = client.get(f"{base_url}?pn=1&pz=30&{BOARD_PARAMS}")
+            with httpx.Client(follow_redirects=True, headers=headers) as client:
+                response = client.get(f"{base_url}?pn=1&pz=30&{BOARD_PARAMS}", timeout=bounded_timeout(deadline))
                 response.raise_for_status()
                 payload = response.json()
             sectors = []
@@ -447,10 +477,13 @@ def hot_sector_from_item(item: dict) -> HotSector | None:
 def fetch_discussion_titles() -> tuple[list[str], list[str]]:
     titles: list[str] = []
     sources: list[str] = []
-    with httpx.Client(timeout=12, headers={"User-Agent": "Mozilla/5.0"}) as client:
+    deadline = fetch_deadline(DISCUSSION_FETCH_BUDGET_SECONDS)
+    with httpx.Client(headers={"User-Agent": "Mozilla/5.0"}) as client:
         for name, url in DISCUSSION_URLS:
+            if remaining_seconds(deadline) <= 0:
+                break
             try:
-                response = client.get(url)
+                response = client.get(url, timeout=bounded_timeout(deadline))
                 response.raise_for_status()
             except Exception:
                 continue
