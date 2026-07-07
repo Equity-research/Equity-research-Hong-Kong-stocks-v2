@@ -23,7 +23,7 @@ from app.daily_ipo import active_subscription_codes, daily_ipo_path
 from app.database import apply_ah_premiums, apply_daily_ipo_records, apply_subscription_multiples, initialize
 from app.prospectus import prune_prospectus_dirs, sync_prospectuses_for_date
 from app.reporting import create_report, report_pdf
-from app.repository import get_ipo, list_ipos
+from app.repository import get_ipo, list_ipos, refresh_grey_market_prices
 from app.subscription import (
     SubscriptionRecord,
     fetch_hkipox_today_rows,
@@ -47,7 +47,7 @@ def main() -> None:
     args = parser.parse_args()
     report_date = date.fromisoformat(args.date)
 
-    progress = Progress(total=11, wait_seconds=max(args.wait, 0))
+    progress = Progress(total=12, wait_seconds=max(args.wait, 0))
     progress.info(f"开始跑全量数据，日期={report_date.isoformat()}")
 
     with progress.step("抓取 HKIPOx 今日申购表，生成 IPO 清单和申购倍数"):
@@ -78,6 +78,9 @@ def main() -> None:
     with progress.step("写入 A/H 溢价到数据库"):
         apply_ah_premiums(report_date)
 
+    with progress.step("刷新已开暗盘股票价格和最新招股价"):
+        grey_market_result = refresh_grey_market_prices(report_date)
+
     with progress.step("生成日报 Markdown/PDF 数据"):
         report = create_report(report_date)
 
@@ -107,6 +110,12 @@ def main() -> None:
         f"deleted_old_dirs={len(deleted_prospectus_dirs)}"
     )
     print(f"ah_premium={ah_path}")
+    print(
+        "grey_market="
+        f"refreshed={len(grey_market_result['refreshed'])} "
+        f"skipped_finalized={len(grey_market_result['skipped'])} "
+        f"failed={len(grey_market_result['failed'])}"
+    )
     print(f"markdown={md_path}")
     print(f"pdf={pdf_path}")
     print(f"html={html_path}")

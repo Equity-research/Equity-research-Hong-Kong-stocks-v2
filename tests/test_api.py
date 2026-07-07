@@ -1,5 +1,5 @@
 import importlib
-from datetime import datetime
+from datetime import date, datetime
 from fastapi.testclient import TestClient
 
 
@@ -60,21 +60,41 @@ def test_api_flow(tmp_path, monkeypatch):
         assert detail["minimum_subscription_amount"] is not None
         assert detail["issuance_shares"] is not None
         assert detail["lot_size"] is not None
-        monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(49.25, datetime.fromisoformat("2026-07-02T18:31:00"), "测试暗盘行情"))
+        monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(49.25, datetime.fromisoformat("2026-07-02T18:31:00"), "测试暗盘行情", offer_price=48.5))
         grey_quote = client.post(f"/api/ipos/{ipo_id}/grey-market-price").json()
         assert grey_quote["price"] == 49.25
         assert grey_quote["source"] == "测试暗盘行情"
+        assert grey_quote["reference_price"] == 48.5
+        assert grey_quote["reference_label"] == "最新招股价"
         detail_with_grey = client.get(f"/api/ipos/{ipo_id}").json()
         assert detail_with_grey["metrics"]["grey_market_price"] == 49.25
-        assert detail_with_grey["metrics"]["grey_market_change_pct"] is not None
+        assert detail_with_grey["metrics"]["grey_market_offer_price"] == 48.5
+        assert detail_with_grey["metrics"]["grey_market_change_pct"] == 1.55
         manual_quote = client.put(f"/api/ipos/{ipo_id}/grey-market-price", json={"price": 5.72}).json()
         assert manual_quote["price"] == 5.72
         assert manual_quote["source"] == "手动输入"
         manual_detail = client.get(f"/api/ipos/{ipo_id}").json()
         assert manual_detail["metrics"]["grey_market_price"] == 5.72
         assert manual_detail["metrics"]["grey_market_source"] == "手动输入"
+        monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(3.3, datetime.fromisoformat("2026-07-03T16:15:00"), "腾讯港股行情", offer_price=5.5, reference_label="昨日收盘价"))
+        manual_refresh_result = repository.refresh_grey_market_prices(date.fromisoformat("2026-07-02"))
+        assert manual_refresh_result["refreshed"]
+        manual_after_refresh = client.get(f"/api/ipos/{ipo_id}").json()
+        assert manual_after_refresh["metrics"]["grey_market_price"] == 5.72
+        assert manual_after_refresh["metrics"]["grey_market_source"] == "手动输入"
+        assert manual_after_refresh["metrics"]["grey_market_reference_price"] == 5.5
+        assert manual_after_refresh["metrics"]["grey_market_reference_label"] == "昨日收盘价"
+        assert manual_after_refresh["metrics"]["grey_market_change_pct"] == 4.0
         finalized = client.post(f"/api/ipos/{ipo_id}/grey-market-price/finalize").json()
         assert finalized["metrics"]["grey_market_finalized"] is True
+        monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(6.0, datetime.fromisoformat("2026-07-03T16:15:00"), "测试暗盘行情", offer_price=5.0))
+        refresh_result = repository.refresh_grey_market_prices(date.fromisoformat("2026-07-03"))
+        assert refresh_result["refreshed"]
+        assert detail["code"] in refresh_result["skipped"]
+        refreshed_code = refresh_result["refreshed"][0]["code"]
+        refreshed_detail = client.get(f"/api/ipos/{next(item['id'] for item in listing['items'] if item['code'] == refreshed_code)}").json()
+        assert refreshed_detail["metrics"]["grey_market_offer_price"] == 5.0
+        assert refreshed_detail["metrics"]["grey_market_change_pct"] == 20.0
         bad = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "这是足够长的调整原因"})
         assert bad.status_code == 422
         short = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "太短"})
@@ -141,7 +161,7 @@ def test_futu_dark_quote_parser(monkeypatch):
                         {
                             "trade_section": "HK_DARK",
                             "point_list": [
-                                {"time": 1783333860000, "cur_price": 5.68},
+                                {"time": 1783333860000, "cur_price": 5.68, "issue_price": 5.48},
                                 {"time": 1783333920000, "cur_price": 5.72},
                             ],
                         }
@@ -153,4 +173,41 @@ def test_futu_dark_quote_parser(monkeypatch):
     quote = grey_market.fetch_futu_dark_quote("02667")
     assert quote is not None
     assert quote.price == 5.72
+    assert quote.offer_price == 5.48
     assert quote.source == "富途暗盘行情"
+
+
+def test_grey_market_quote_uses_backup_sources(monkeypatch):
+    import app.grey_market as grey_market
+
+    monkeypatch.setattr(grey_market, "fetch_futu_dark_quote", lambda code: None)
+    monkeypatch.setattr(grey_market, "fetch_tencent_hk_quote", lambda code: grey_market.GreyMarketQuote(
+        4.87,
+        datetime.fromisoformat("2026-07-06T16:40:29"),
+        "腾讯港股行情",
+    ))
+    monkeypatch.setattr(grey_market, "fetch_yahoo_hk_quote", lambda code: None)
+
+    quote = grey_market.fetch_grey_market_quote("02667.HK")
+
+    assert quote.price == 4.87
+    assert quote.source == "腾讯港股行情"
+
+
+def test_tencent_quote_uses_previous_close_as_reference(monkeypatch):
+    import app.grey_market as grey_market
+
+    class Response:
+        text = 'v_hk02667="100~同仁堂医养~02667~3.280~5.500~4.760~29154960.0~0~0~3.280~0~0~0~0~0~0~0~0~0~3.280~0~0~0~0~0~0~0~0~0~29154960.0~2026/07/07 13:08:35~-2.220~-40.36";'
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(grey_market.httpx, "get", lambda *args, **kwargs: Response())
+
+    quote = grey_market.fetch_tencent_hk_quote("02667")
+
+    assert quote is not None
+    assert quote.price == 3.28
+    assert quote.offer_price == 5.5
+    assert quote.reference_label == "昨日收盘价"

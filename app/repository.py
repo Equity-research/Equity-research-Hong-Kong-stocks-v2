@@ -114,9 +114,47 @@ def fetch_and_save_grey_market_price(ipo_id: int):
         "code": row["code"],
         "price": quote.price,
         "change_pct": metrics.get("grey_market_change_pct"),
+        "reference_price": metrics.get("grey_market_reference_price"),
+        "reference_label": metrics.get("grey_market_reference_label"),
         "fetched_at": quote.fetched_at,
         "source": quote.source,
     }
+
+
+def refresh_grey_market_prices(target_date: date) -> dict:
+    refreshed = []
+    skipped = []
+    failed = []
+    with connect() as db:
+        rows = db.execute("SELECT * FROM ipos WHERE deadline <= ? ORDER BY deadline, code", (target_date.isoformat(),)).fetchall()
+        for row in rows:
+            metrics = json.loads(row["metrics_json"])
+            if metrics.get("grey_market_finalized") is True:
+                skipped.append(row["code"])
+                continue
+            try:
+                quote = fetch_grey_market_quote(row["code"])
+            except ValueError as exc:
+                failed.append({"code": row["code"], "reason": str(exc)})
+                continue
+            if metrics.get("grey_market_source") == "手动输入" and metrics.get("grey_market_price") is not None:
+                quote = GreyMarketQuoteValue(
+                    price=float(metrics["grey_market_price"]),
+                    fetched_at=quote.fetched_at,
+                    source="手动输入",
+                    offer_price=quote.offer_price,
+                    reference_label=quote.reference_label,
+                )
+            metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]))
+            db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), row["id"]))
+            refreshed.append({
+                "code": row["code"],
+                "price": quote.price,
+                "reference_price": metrics.get("grey_market_reference_price"),
+                "reference_label": metrics.get("grey_market_reference_label"),
+                "change_pct": metrics.get("grey_market_change_pct"),
+            })
+    return {"refreshed": refreshed, "skipped": skipped, "failed": failed}
 
 
 def save_manual_grey_market_price(ipo_id: int, price: float, finalized: bool = False):
@@ -124,7 +162,21 @@ def save_manual_grey_market_price(ipo_id: int, price: float, finalized: bool = F
         row = db.execute("SELECT * FROM ipos WHERE id=?", (ipo_id,)).fetchone()
         if not row:
             return None
-        quote = GreyMarketQuoteValue(price=price, fetched_at=datetime.now(), source="手动输入")
+        offer_price = None
+        reference_label = None
+        try:
+            fetched_quote = fetch_grey_market_quote(row["code"])
+            offer_price = fetched_quote.offer_price
+            reference_label = fetched_quote.reference_label
+        except ValueError:
+            pass
+        quote = GreyMarketQuoteValue(
+            price=price,
+            fetched_at=datetime.now(),
+            source="手动输入",
+            offer_price=offer_price,
+            reference_label=reference_label,
+        )
         metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]), finalized=finalized)
         db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
     return {
@@ -132,6 +184,8 @@ def save_manual_grey_market_price(ipo_id: int, price: float, finalized: bool = F
         "code": row["code"],
         "price": quote.price,
         "change_pct": metrics.get("grey_market_change_pct"),
+        "reference_price": metrics.get("grey_market_reference_price"),
+        "reference_label": metrics.get("grey_market_reference_label"),
         "fetched_at": quote.fetched_at,
         "source": quote.source,
     }

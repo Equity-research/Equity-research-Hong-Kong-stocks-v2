@@ -34,6 +34,8 @@ interface LatestIPO {
   expectedListingDate: string | null
   greyMarketPrice: number | null
   greyMarketChangePct: number | null
+  greyMarketReferencePrice: number | null
+  greyMarketReferenceLabel: string | null
   greyMarketFetchedAt: string | null
   greyMarketSource: string | null
   greyMarketFinalized: boolean
@@ -116,6 +118,8 @@ function toLatestIPO(item: IPODetail): LatestIPO {
     expectedListingDate: typeof metrics.expected_listing_date === 'string' ? metrics.expected_listing_date : null,
     greyMarketPrice: typeof metrics.grey_market_price === 'number' ? metrics.grey_market_price : null,
     greyMarketChangePct: typeof metrics.grey_market_change_pct === 'number' ? metrics.grey_market_change_pct : null,
+    greyMarketReferencePrice: typeof metrics.grey_market_reference_price === 'number' ? metrics.grey_market_reference_price : null,
+    greyMarketReferenceLabel: typeof metrics.grey_market_reference_label === 'string' ? metrics.grey_market_reference_label : null,
     greyMarketFetchedAt: typeof metrics.grey_market_fetched_at === 'string' ? metrics.grey_market_fetched_at : null,
     greyMarketSource: typeof metrics.grey_market_source === 'string' ? metrics.grey_market_source : null,
     greyMarketFinalized: metrics.grey_market_finalized === true,
@@ -240,7 +244,7 @@ function GreyMarketInput({ item, onSave, onFinalize, saving }: { item: LatestIPO
       <input aria-label={`${item.name} 暗盘价格`} inputMode="decimal" placeholder="输入价格" value={value} onChange={event => setValue(event.target.value)} />
       <button className="secondary grey-market-fetch" type="submit" disabled={!canSave || saving}>{saving ? '保存中...' : '保存'}</button>
     </form> : <div className="grey-market-actions">
-      {item.greyMarketChangePct != null && <em className={item.greyMarketChangePct < 0 ? 'green' : 'red'}>{signedPct(item.greyMarketChangePct)}</em>}
+      {item.greyMarketChangePct != null && <em className={item.greyMarketChangePct < 0 ? 'green' : 'red'} title={`${item.greyMarketReferenceLabel ?? '参考价'} ${item.greyMarketReferencePrice?.toFixed(2) ?? '待获取'} HKD`}>{signedPct(item.greyMarketChangePct)}</em>}
       {canEdit && item.greyMarketPrice != null && <>
         <button type="button" className="secondary grey-market-fetch" onClick={() => setEditing(true)} disabled={saving}>更新</button>
         <button type="button" className="secondary grey-market-fetch" onClick={() => onFinalize(item)} disabled={saving}>完成录入</button>
@@ -297,7 +301,7 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
         <section><h3>暗盘价格</h3><div className="grey-market-detail">
           <strong>{item.greyMarketPrice == null ? '待获取' : `${item.greyMarketPrice.toFixed(2)} HKD`}</strong>
           {item.greyMarketChangePct != null && <b className={item.greyMarketChangePct < 0 ? 'green' : 'red'}>{signedPct(item.greyMarketChangePct)}</b>}
-          <span>{item.greyMarketFetchedAt ? `记录时间 ${formatDateTime(item.greyMarketFetchedAt)} · ${item.greyMarketSource ?? '行情源'}` : '可在历史记录里手动输入暗盘价格；当日 18:31 仍会尝试自动拉取最终暗盘收盘价。'}</span>
+          <span>{item.greyMarketFetchedAt ? `记录时间 ${formatDateTime(item.greyMarketFetchedAt)} · ${item.greyMarketSource ?? '行情源'} · 按${item.greyMarketReferenceLabel ?? '参考价'} ${item.greyMarketReferencePrice?.toFixed(2) ?? '待获取'} HKD 计算` : '可在历史记录里手动输入暗盘价格；暗盘开始后会尝试获取最新招股价并计算暗盘涨跌幅。'}</span>
         </div></section>
         <section><h3>发行资料</h3><dl className="issue-grid">
           <div><dt>港股招股价区间</dt><dd>{item.price} HKD</dd></div>
@@ -600,6 +604,8 @@ export default function App() {
         ...current,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
+        greyMarketReferencePrice: quote.reference_price,
+        greyMarketReferenceLabel: quote.reference_label,
         greyMarketFetchedAt: quote.fetched_at,
         greyMarketSource: quote.source,
         greyMarketFinalized: false,
@@ -622,6 +628,8 @@ export default function App() {
         ...current,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
+        greyMarketReferencePrice: quote.reference_price,
+        greyMarketReferenceLabel: quote.reference_label,
         greyMarketFetchedAt: quote.fetched_at,
         greyMarketSource: quote.source,
         greyMarketFinalized: false,
@@ -716,6 +724,11 @@ export default function App() {
     }
   }
 
+  const openIPOHistory = async () => {
+    await loadData()
+    setIPOHistoryOpen(true)
+  }
+
   const industries = useMemo(() => [...new Set(data.map(item => item.industry))].sort(), [data])
   const visible = data.filter(item => (!industry || item.industry === industry) && (!tier || item.tier === tier))
   const createReport = async () => {
@@ -791,7 +804,7 @@ export default function App() {
         {!loading && !error && <>
           <Insights data={data} onOpen={setSelected} />
           <FundingConflict data={data} />
-          <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => window.location.reload()}><RefreshCw size={16}/>重置</button><button className="secondary history-button" onClick={() => setIPOHistoryOpen(true)}><Archive size={16}/>历史记录<span>{expiredData.length}</span></button></div>
+          <div className="filters"><label>行业<select value={industry} onChange={e => setIndustry(e.target.value)}><option value="">全部</option>{industries.map(value => <option key={value}>{value}</option>)}</select></label><label>推荐<select value={tier} onChange={e => setTier(e.target.value)}><option value="">全部</option><option>申购</option><option>观望</option><option>回避</option></select></label><button className="secondary" onClick={() => window.location.reload()}><RefreshCw size={16}/>重置</button><button className="secondary history-button" onClick={openIPOHistory}><Archive size={16}/>历史记录<span>{expiredData.length}</span></button></div>
           <section className="cards">{visible.map(item => <IPOCard item={item} key={item.code} onOpen={setSelected} />)}</section>
           {!visible.length && <div className="empty">没有符合条件的 IPO</div>}
         </>}

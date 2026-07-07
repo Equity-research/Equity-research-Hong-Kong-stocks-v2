@@ -2,6 +2,10 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.local-bin/node
+.local-bin/node/
+.local-bin/node-*/
+.local-bin/node-download/
 *.pyc
 data/*.db
 output/

@@ -119,7 +119,7 @@ def start_data_refresh(report_date: date | None = None):
         "report_date": target_date,
         "detail": None,
         "progress_current": 0,
-        "progress_total": 11,
+        "progress_total": 12,
         "progress_percent": 0,
         "progress_label": "等待开始",
     }
@@ -175,7 +175,7 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
         job["finished_at"] = datetime.now()
         job["detail"] = detail
         if status == "succeeded":
-            job["progress_current"] = job.get("progress_total", 11)
+            job["progress_current"] = job.get("progress_total", 12)
             job["progress_percent"] = 100
             job["progress_label"] = "全部完成"
 

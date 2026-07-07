@@ -16,6 +16,8 @@ export interface GreyMarketQuote {
   code: string
   price: number
   change_pct: number | null
+  reference_price: number | null
+  reference_label: string | null
   fetched_at: string
   source: string
 }

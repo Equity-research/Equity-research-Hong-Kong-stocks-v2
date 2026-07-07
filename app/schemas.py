@@ -92,6 +92,8 @@ class GreyMarketQuote(BaseModel):
     code: str
     price: float
     change_pct: float | None = None
+    reference_price: float | None = None
+    reference_label: str | None = None
     fetched_at: datetime
     source: str
 
