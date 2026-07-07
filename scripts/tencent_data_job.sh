@@ -7,7 +7,25 @@ PORT="${PORT:-8080}"
 BRANCH="${BRANCH:-main}"
 REPORT_DATE="${1:-$(TZ=Asia/Shanghai date +%F)}"
 WAIT_SECONDS="${WAIT_SECONDS:-0}"
-APP_USER="${APP_USER:-$(id -un)}"
+APP_USER="${APP_USER:-}"
+
+service_user() {
+  local configured_user pid_user pid
+  configured_user="$(systemctl show -p User --value "$SERVICE_NAME" 2>/dev/null || true)"
+  if [ -n "$configured_user" ]; then
+    echo "$configured_user"
+    return
+  fi
+  pid="$(systemctl show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || true)"
+  if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+    pid_user="$(ps -o user= -p "$pid" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$pid_user" ]; then
+      echo "$pid_user"
+      return
+    fi
+  fi
+  id -un
+}
 
 echo "==> Run date: ${REPORT_DATE}"
 echo "==> App dir: ${APP_DIR}"
@@ -45,9 +63,12 @@ fi
 echo "==> 1. Prepare writable directories"
 mkdir -p data prospectuses output
 if [ "$(id -u)" = "0" ]; then
-  chown -R "$APP_USER":"$APP_USER" data prospectuses output ipo_daily_analysis.html ipo_daily_analysis.md ipo_daily_analysis.pdf 2>/dev/null || true
+  APP_USER="${APP_USER:-$(service_user)}"
+  chown -R "$APP_USER":"$APP_USER" data prospectuses output 2>/dev/null || true
+  chown "$APP_USER":"$APP_USER" ipo_daily_analysis.html ipo_daily_analysis.md ipo_daily_analysis.pdf 2>/dev/null || true
 fi
-chmod -R u+rwX data prospectuses output
+chmod -R a+rwX data prospectuses output
+chmod a+rw ipo_daily_analysis.html ipo_daily_analysis.md ipo_daily_analysis.pdf 2>/dev/null || true
 
 echo "==> 2. Prepare Python environment"
 if [ ! -d .venv ]; then
