@@ -66,20 +66,60 @@ if [ -f "${CERT_DIR}/fullchain.pem" ] && [ -f "${CERT_DIR}/privkey.pem" ]; then
   echo "Found certificate in ${CERT_DIR}; installing HTTP + HTTPS config."
   $SUDO tee "/etc/nginx/sites-available/${NGINX_SITE}" >/dev/null <<EOF
 server {
-    listen 80;
+    listen 80 default_server;
     server_name ${DOMAIN} ${WWW_DOMAIN};
+
+    root ${FRONTEND_DIR};
+    index index.html;
+
+    client_max_body_size 20m;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
     }
 
+    location = /api/health {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 15s;
+        proxy_connect_timeout 5s;
+    }
+
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 180s;
+        proxy_read_timeout 180s;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location ^~ /assets/ {
+        try_files \$uri =404;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+    }
+
     location / {
-        return 301 https://\$host\$request_uri;
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-cache" always;
     }
 }
 
 server {
-    listen 443 ssl;
+    listen 443 ssl default_server;
     server_name ${DOMAIN} ${WWW_DOMAIN};
 
     ssl_certificate ${CERT_DIR}/fullchain.pem;
@@ -143,7 +183,7 @@ else
   echo "Certificate not found in ${CERT_DIR}; installing HTTP-only recovery config."
   $SUDO tee "/etc/nginx/sites-available/${NGINX_SITE}" >/dev/null <<EOF
 server {
-    listen 80;
+    listen 80 default_server;
     server_name ${DOMAIN} ${WWW_DOMAIN};
 
     root ${FRONTEND_DIR};
