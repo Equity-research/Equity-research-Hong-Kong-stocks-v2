@@ -89,6 +89,11 @@ def test_api_flow(tmp_path, monkeypatch):
         assert manual_after_refresh["metrics"]["grey_market_change_pct"] == 4.0
         assert manual_after_refresh["price_low"] == 5.5
         assert manual_after_refresh["price_high"] == 5.5
+        with database.connect() as db:
+            db.execute("UPDATE ipos SET price_low=?, price_high=? WHERE id=?", (detail["price_low"], detail["price_high"], ipo_id))
+        stale_price_detail = client.get(f"/api/ipos/{ipo_id}").json()
+        assert stale_price_detail["price_low"] == 5.5
+        assert stale_price_detail["price_high"] == 5.5
         finalized = client.post(f"/api/ipos/{ipo_id}/grey-market-price/finalize").json()
         assert finalized["metrics"]["grey_market_finalized"] is True
         monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(6.0, datetime.fromisoformat("2026-07-03T16:15:00"), "测试暗盘行情", offer_price=5.0))
