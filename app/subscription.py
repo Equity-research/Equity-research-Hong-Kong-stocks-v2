@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from app.config import DATA_DIR
+from app.csv_io import write_csv_atomic
 
 
 HKIPOX_URL = "https://hkipox.com/"
@@ -83,29 +84,27 @@ def parse_hkipox_today_rows(page: str) -> list[HKIPOxRow]:
 
 def write_daily_ipo_from_hkipox(record_date: date, rows: list[HKIPOxRow]) -> Path:
     path = DATA_DIR / f"daily_ipo_{record_date.isoformat()}.csv"
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "record_date", "stock_code", "company_name", "status", "subscription_end_date",
-            "expected_listing_date", "data_source", "source_url",
-        ])
-        writer.writeheader()
-        for row in rows:
-            if row.subscription_end_date <= record_date:
-                continue
-            if row.expected_listing_date is not None and row.expected_listing_date <= record_date:
-                continue
-            writer.writerow({
-                "record_date": record_date.isoformat(),
-                "stock_code": row.stock_code,
-                "company_name": row.company_name,
-                "status": "认购中",
-                "subscription_end_date": row.subscription_end_date.isoformat(),
-                "expected_listing_date": row.expected_listing_date.isoformat() if row.expected_listing_date else "",
-                "data_source": "HKIPOx",
-                "source_url": HKIPOX_URL,
-            })
-    return path
+    fieldnames = [
+        "record_date", "stock_code", "company_name", "status", "subscription_end_date",
+        "expected_listing_date", "data_source", "source_url",
+    ]
+    output_rows = []
+    for row in rows:
+        if row.subscription_end_date <= record_date:
+            continue
+        if row.expected_listing_date is not None and row.expected_listing_date <= record_date:
+            continue
+        output_rows.append({
+            "record_date": record_date.isoformat(),
+            "stock_code": row.stock_code,
+            "company_name": row.company_name,
+            "status": "认购中",
+            "subscription_end_date": row.subscription_end_date.isoformat(),
+            "expected_listing_date": row.expected_listing_date.isoformat() if row.expected_listing_date else "",
+            "data_source": "HKIPOx",
+            "source_url": HKIPOX_URL,
+        })
+    return write_csv_atomic(path, fieldnames, output_rows)
 
 
 def write_subscription_records(record_date: date, rows: list[HKIPOxRow]) -> Path:
@@ -130,27 +129,25 @@ def write_subscription_records(record_date: date, rows: list[HKIPOxRow]) -> Path
 
 def write_subscription_csv(record_date: date, records: list[SubscriptionRecord]) -> Path:
     path = subscription_path(record_date)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "record_date", "captured_at", "stock_code", "company_name", "subscription_multiple",
-            "status", "subscription_end_date", "data_type", "data_source", "source_url",
-        ])
-        writer.writeheader()
-        for record in records:
-            writer.writerow({
-                "record_date": record.record_date.isoformat(),
-                "captured_at": record.captured_at,
-                "stock_code": record.stock_code,
-                "company_name": record.company_name,
-                "subscription_multiple": "" if record.subscription_multiple is None else f"{record.subscription_multiple:.2f}",
-                "status": record.status,
-                "subscription_end_date": record.subscription_end_date.isoformat(),
-                "data_type": record.data_type,
-                "data_source": record.data_source,
-                "source_url": record.source_url,
-            })
-    return path
+    fieldnames = [
+        "record_date", "captured_at", "stock_code", "company_name", "subscription_multiple",
+        "status", "subscription_end_date", "data_type", "data_source", "source_url",
+    ]
+    output_rows = []
+    for record in records:
+        output_rows.append({
+            "record_date": record.record_date.isoformat(),
+            "captured_at": record.captured_at,
+            "stock_code": record.stock_code,
+            "company_name": record.company_name,
+            "subscription_multiple": "" if record.subscription_multiple is None else f"{record.subscription_multiple:.2f}",
+            "status": record.status,
+            "subscription_end_date": record.subscription_end_date.isoformat(),
+            "data_type": record.data_type,
+            "data_source": record.data_source,
+            "source_url": record.source_url,
+        })
+    return write_csv_atomic(path, fieldnames, output_rows)
 
 
 def load_subscription_records(record_date: date) -> list[SubscriptionRecord]:

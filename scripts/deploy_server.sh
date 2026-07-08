@@ -47,15 +47,7 @@ if [ "$STASH_CREATED" = "1" ]; then
   echo "Previous local changes were preserved in git stash."
 fi
 
-echo "Preparing writable generated-file paths."
-mkdir -p data prospectuses output
-if [ "$(id -u)" = "0" ]; then
-  APP_USER="${APP_USER:-$(service_user)}"
-  chown -R "$APP_USER":"$APP_USER" data prospectuses output 2>/dev/null || true
-  chown "$APP_USER":"$APP_USER" ipo_daily_analysis.html ipo_daily_analysis.md ipo_daily_analysis.pdf 2>/dev/null || true
-fi
-chmod -R a+rwX data prospectuses output
-chmod a+rw ipo_daily_analysis.html ipo_daily_analysis.md ipo_daily_analysis.pdf 2>/dev/null || true
+./scripts/prepare_writable_paths.sh
 
 if [ ! -d .venv ]; then
   python3 -m venv .venv
