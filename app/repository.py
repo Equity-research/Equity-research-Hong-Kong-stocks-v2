@@ -108,7 +108,14 @@ def fetch_and_save_grey_market_price(ipo_id: int):
             return None
         quote = fetch_grey_market_quote(row["code"])
         metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]))
-        db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+        final_offer_price = final_offer_price_from_quote(quote)
+        if final_offer_price is None:
+            db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+        else:
+            db.execute(
+                "UPDATE ipos SET price_low=?, price_high=?, metrics_json=? WHERE id=?",
+                (final_offer_price, final_offer_price, json.dumps(metrics, ensure_ascii=False), ipo_id),
+            )
     return {
         "ipo_id": ipo_id,
         "code": row["code"],
@@ -146,7 +153,14 @@ def refresh_grey_market_prices(target_date: date) -> dict:
                     reference_label=quote.reference_label,
                 )
             metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]))
-            db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), row["id"]))
+            final_offer_price = final_offer_price_from_quote(quote)
+            if final_offer_price is None:
+                db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), row["id"]))
+            else:
+                db.execute(
+                    "UPDATE ipos SET price_low=?, price_high=?, metrics_json=? WHERE id=?",
+                    (final_offer_price, final_offer_price, json.dumps(metrics, ensure_ascii=False), row["id"]),
+                )
             refreshed.append({
                 "code": row["code"],
                 "price": quote.price,
@@ -178,7 +192,14 @@ def save_manual_grey_market_price(ipo_id: int, price: float, finalized: bool = F
             reference_label=reference_label,
         )
         metrics = quote_to_metrics(row["metrics_json"], quote, float(row["price_high"]), finalized=finalized)
-        db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+        final_offer_price = final_offer_price_from_quote(quote)
+        if final_offer_price is None:
+            db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
+        else:
+            db.execute(
+                "UPDATE ipos SET price_low=?, price_high=?, metrics_json=? WHERE id=?",
+                (final_offer_price, final_offer_price, json.dumps(metrics, ensure_ascii=False), ipo_id),
+            )
     return {
         "ipo_id": ipo_id,
         "code": row["code"],
@@ -202,3 +223,11 @@ def finalize_grey_market_price(ipo_id: int):
         metrics["grey_market_finalized"] = True
         db.execute("UPDATE ipos SET metrics_json=? WHERE id=?", (json.dumps(metrics, ensure_ascii=False), ipo_id))
     return get_ipo(ipo_id)
+
+
+def final_offer_price_from_quote(quote: GreyMarketQuoteValue) -> float | None:
+    if quote.reference_label != "昨日收盘价":
+        return None
+    if quote.offer_price is None or quote.offer_price <= 0:
+        return None
+    return quote.offer_price
