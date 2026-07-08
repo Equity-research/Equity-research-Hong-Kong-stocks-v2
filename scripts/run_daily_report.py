@@ -2,8 +2,10 @@ import argparse
 import csv
 import html
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -19,6 +21,7 @@ from app.ah_premium import (
     write_ah_premium_records,
 )
 from app.config import DATA_DIR, ROOT
+from app.csv_io import write_csv_atomic
 from app.daily_ipo import active_subscription_codes, daily_ipo_path
 from app.database import apply_ah_premiums, apply_daily_ipo_records, apply_subscription_multiples, initialize
 from app.prospectus import prune_prospectus_dirs, sync_prospectuses_for_date
@@ -46,6 +49,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     report_date = date.fromisoformat(args.date)
+    ensure_generated_paths_writable()
 
     progress = Progress(total=12, wait_seconds=max(args.wait, 0))
     progress.info(f"开始跑全量数据，日期={report_date.isoformat()}")
@@ -206,12 +210,7 @@ def ensure_daily_ipo_file(report_date: date) -> Path:
         next_row["status"] = "认购中"
         refreshed.append(next_row)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(refreshed)
-    return path
+    return write_csv_atomic(path, fieldnames, refreshed)
 
 
 def fallback_subscription_records(report_date: date, latest: Path) -> list[SubscriptionRecord]:
@@ -290,10 +289,36 @@ def normalize_daily_ipo_file(path: Path, report_date: date) -> None:
         next_row["status"] = "认购中"
         active_rows.append(next_row)
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(active_rows)
+    write_csv_atomic(path, fieldnames, active_rows)
+
+
+def ensure_generated_paths_writable() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.NamedTemporaryFile(dir=DATA_DIR, prefix=".write-check.", delete=False) as handle:
+            temp_name = handle.name
+        os.unlink(temp_name)
+    except OSError as exc:
+        raise PermissionError(
+            f"{DATA_DIR} 当前用户不可写，无法刷新 daily_ipo/申购倍数/AH 数据；"
+            f"请先执行 sudo APP_DIR={ROOT} scripts/prepare_writable_paths.sh"
+        ) from exc
+
+    for path in [
+        ROOT / "ipo_daily_analysis.md",
+        ROOT / "ipo_daily_analysis.pdf",
+        ROOT / "ipo_daily_analysis.html",
+    ]:
+        if path.exists() and not os.access(path, os.W_OK):
+            raise PermissionError(
+                f"{path} 当前用户不可写，无法覆盖日报；"
+                f"请先执行 sudo APP_DIR={ROOT} scripts/prepare_writable_paths.sh"
+            )
+        if not path.exists() and not os.access(path.parent, os.W_OK):
+            raise PermissionError(
+                f"{path.parent} 当前用户不可写，无法创建 {path.name}；"
+                f"请先执行 sudo APP_DIR={ROOT} scripts/prepare_writable_paths.sh"
+            )
 
 
 def latest_daily_ipo_before(report_date: date) -> Path | None:

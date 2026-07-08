@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import os
 import re
 import subprocess
 import sys
@@ -139,6 +140,7 @@ def data_refresh_status(job_id: str):
 
 
 def run_data_refresh_job(job_id: str, report_date: date) -> None:
+    output_lines: list[str] = []
     command = [
         sys.executable,
         str(ROOT / "scripts" / "run_daily_report.py"),
@@ -147,8 +149,8 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
         "--wait",
         "0",
     ]
-    output_lines: list[str] = []
     try:
+        prepare_writable_paths(output_lines)
         process = subprocess.Popen(
             command,
             cwd=ROOT,
@@ -178,6 +180,27 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
             job["progress_current"] = job.get("progress_total", 12)
             job["progress_percent"] = 100
             job["progress_label"] = "全部完成"
+
+
+def prepare_writable_paths(output_lines: list[str]) -> None:
+    script = ROOT / "scripts" / "prepare_writable_paths.sh"
+    if not script.exists():
+        return
+    env = os.environ.copy()
+    env.setdefault("APP_DIR", str(ROOT))
+    result = subprocess.run(
+        [str(script)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    detail = result.stdout.strip()
+    if detail:
+        output_lines.extend(detail.splitlines())
+    if result.returncode != 0:
+        raise RuntimeError(detail or f"准备写入目录失败，退出码 {result.returncode}")
 
 
 def update_refresh_progress(job_id: str, line: str, detail: str | None) -> None:

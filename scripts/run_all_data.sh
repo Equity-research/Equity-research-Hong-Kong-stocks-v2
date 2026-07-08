@@ -8,6 +8,8 @@ REPORT_DATE="${1:-$(date +%F)}"
 WAIT_SECONDS="${WAIT_SECONDS:-2}"
 
 echo "[1/4] 准备 Python 虚拟环境"
+./scripts/prepare_writable_paths.sh
+
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi

@@ -11,17 +11,21 @@ APP_USER="${APP_USER:-}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-10}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-180}"
 GIT_COMMAND_TIMEOUT="${GIT_COMMAND_TIMEOUT:-90}"
-GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=2}"
+JOB_LOG_DIR="${JOB_LOG_DIR:-${APP_DIR}/output/data-job-logs}"
+LOCK_FILE="${LOCK_FILE:-/tmp/stock-data-job.lock}"
+
 export GIT_TERMINAL_PROMPT=0
-export GIT_SSH_COMMAND
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=2}"
 
 service_user() {
   local configured_user pid_user pid
+
   configured_user="$(systemctl show -p User --value "$SERVICE_NAME" 2>/dev/null || true)"
   if [ -n "$configured_user" ]; then
     echo "$configured_user"
     return
   fi
+
   pid="$(systemctl show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || true)"
   if [ -n "$pid" ] && [ "$pid" != "0" ]; then
     pid_user="$(ps -o user= -p "$pid" 2>/dev/null | awk '{print $1}')"
@@ -30,7 +34,21 @@ service_user() {
       return
     fi
   fi
+
   id -un
+}
+
+run_timed() {
+  local label="$1"
+  local seconds="$2"
+  shift 2
+
+  echo "${label} (timeout ${seconds}s)"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --preserve-status "$seconds" "$@"
+  else
+    "$@"
+  fi
 }
 
 curl_json_to_file() {
@@ -48,19 +66,6 @@ curl_json_to_file() {
   fi
 }
 
-run_timed() {
-  local label="$1"
-  local seconds="$2"
-  shift 2
-
-  echo "${label} (timeout ${seconds}s)"
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --preserve-status "$seconds" "$@"
-  else
-    "$@"
-  fi
-}
-
 echo "==> Run date: ${REPORT_DATE}"
 echo "==> App dir: ${APP_DIR}"
 echo "==> Branch: ${BRANCH}"
@@ -69,6 +74,21 @@ if [ ! -d "$APP_DIR" ]; then
   echo "ERROR: APP_DIR not found: $APP_DIR"
   exit 1
 fi
+
+mkdir -p "$JOB_LOG_DIR"
+LOG_FILE="${JOB_LOG_DIR}/tencent-cloud-data-${REPORT_DATE}-$(date +%Y%m%d%H%M%S).log"
+
+exec 9>"$LOCK_FILE"
+if command -v flock >/dev/null 2>&1; then
+  if ! flock -n 9; then
+    echo "Another stock data job is already running. Lock: ${LOCK_FILE}"
+    exit 75
+  fi
+fi
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "==> Log file: ${LOG_FILE}"
+echo "==> Started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cd "$APP_DIR"
 
@@ -80,7 +100,7 @@ fi
 
 STASH_CREATED=0
 if run_timed "Fetching origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git fetch origin "$BRANCH"; then
-  echo "Checking local changes before pulling ${BRANCH}."
+  echo "Checking local changes before updating ${BRANCH}."
   if [ -n "$(git status --porcelain)" ]; then
     echo "Local changes detected; stashing before updating ${BRANCH}."
     run_timed "Stashing local changes" "$GIT_COMMAND_TIMEOUT" git stash push --include-untracked -m "data-job-autostash ${REPORT_DATE} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -153,8 +173,7 @@ ls -lh \
   "data/a_share_hot_sectors_${REPORT_DATE}.csv" 2>/dev/null || true
 
 echo "--- US market files ---"
-ls -lh \
-  "data/us_market_news_${REPORT_DATE}.json" 2>/dev/null || true
+ls -lh "data/us_market_news_${REPORT_DATE}.json" 2>/dev/null || true
 
 echo "--- Reports API ---"
 curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time 30 -fsS "http://127.0.0.1:${PORT}/api/reports"
@@ -163,4 +182,5 @@ echo
 echo "==> 11. Service status"
 systemctl --no-pager --lines=20 status "$SERVICE_NAME"
 
+echo "==> Finished at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "==> Data job complete"

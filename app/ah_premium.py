@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from app.config import DATA_DIR
+from app.csv_io import write_csv_atomic
 
 
 @dataclass(frozen=True)
@@ -46,27 +47,25 @@ def load_ah_premium_records(record_date: date) -> list[AHPremiumRecord]:
 
 def write_ah_premium_records(record_date: date, records: list[AHPremiumRecord]) -> Path:
     path = ah_premium_path(record_date)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "record_date", "hk_code", "company_name", "a_ticker", "h_offer_price_hkd",
-            "a_close_cny", "cny_hkd", "ah_premium", "source", "notes",
-        ])
-        writer.writeheader()
-        for record in records:
-            writer.writerow({
-                "record_date": record.record_date.isoformat(),
-                "hk_code": record.hk_code,
-                "company_name": record.company_name,
-                "a_ticker": record.a_ticker,
-                "h_offer_price_hkd": record.h_offer_price_hkd,
-                "a_close_cny": _format_optional(record.a_close_cny),
-                "cny_hkd": _format_optional(record.cny_hkd),
-                "ah_premium": _format_optional(record.ah_premium),
-                "source": record.source,
-                "notes": record.notes,
-            })
-    return path
+    fieldnames = [
+        "record_date", "hk_code", "company_name", "a_ticker", "h_offer_price_hkd",
+        "a_close_cny", "cny_hkd", "ah_premium", "source", "notes",
+    ]
+    output_rows = []
+    for record in records:
+        output_rows.append({
+            "record_date": record.record_date.isoformat(),
+            "hk_code": record.hk_code,
+            "company_name": record.company_name,
+            "a_ticker": record.a_ticker,
+            "h_offer_price_hkd": record.h_offer_price_hkd,
+            "a_close_cny": _format_optional(record.a_close_cny),
+            "cny_hkd": _format_optional(record.cny_hkd),
+            "ah_premium": _format_optional(record.ah_premium),
+            "source": record.source,
+            "notes": record.notes,
+        })
+    return write_csv_atomic(path, fieldnames, output_rows)
 
 
 def fetch_ah_premium_records(record_date: date, offer_prices: dict[str, float]) -> list[AHPremiumRecord]:
