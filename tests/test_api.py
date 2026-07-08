@@ -67,6 +67,8 @@ def test_api_flow(tmp_path, monkeypatch):
         assert grey_quote["reference_price"] == 48.5
         assert grey_quote["reference_label"] == "最新招股价"
         detail_with_grey = client.get(f"/api/ipos/{ipo_id}").json()
+        assert detail_with_grey["price_low"] == detail["price_low"]
+        assert detail_with_grey["price_high"] == detail["price_high"]
         assert detail_with_grey["metrics"]["grey_market_price"] == 49.25
         assert detail_with_grey["metrics"]["grey_market_offer_price"] == 48.5
         assert detail_with_grey["metrics"]["grey_market_change_pct"] == 1.55
@@ -85,6 +87,8 @@ def test_api_flow(tmp_path, monkeypatch):
         assert manual_after_refresh["metrics"]["grey_market_reference_price"] == 5.5
         assert manual_after_refresh["metrics"]["grey_market_reference_label"] == "昨日收盘价"
         assert manual_after_refresh["metrics"]["grey_market_change_pct"] == 4.0
+        assert manual_after_refresh["price_low"] == 5.5
+        assert manual_after_refresh["price_high"] == 5.5
         finalized = client.post(f"/api/ipos/{ipo_id}/grey-market-price/finalize").json()
         assert finalized["metrics"]["grey_market_finalized"] is True
         monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(6.0, datetime.fromisoformat("2026-07-03T16:15:00"), "测试暗盘行情", offer_price=5.0))

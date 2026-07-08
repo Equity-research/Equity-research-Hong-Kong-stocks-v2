@@ -61,6 +61,7 @@ const tierClass = (tier: Tier) => tier === '申购' ? 'buy' : tier === '观望' 
 const ipoLabel = (item: LatestIPO) => `${item.name}（${item.code}.HK）`
 const shortDate = (value: string) => value.slice(5)
 const priceText = (low: number, high: number) => low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
+const finalOfferPriceText = (label: string | null, value: number | null) => label === '昨日收盘价' && value != null ? priceText(value, value) : null
 const signedPct = (value: number | null) => value == null ? '' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 const localISODate = () => {
   const now = new Date()
@@ -600,8 +601,10 @@ export default function App() {
     if (!silent) setToastMessage('')
     try {
       const quote = await api.greyMarketPrice(item.id)
+      const updatedOfferPrice = finalOfferPriceText(quote.reference_label, quote.reference_price)
       const patch = (current: LatestIPO) => current.id === item.id ? {
         ...current,
+        price: updatedOfferPrice ?? current.price,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
         greyMarketReferencePrice: quote.reference_price,
@@ -624,8 +627,10 @@ export default function App() {
     setToastMessage('')
     try {
       const quote = await api.saveGreyMarketPrice(item.id, price)
+      const updatedOfferPrice = finalOfferPriceText(quote.reference_label, quote.reference_price)
       const patch = (current: LatestIPO) => current.id === item.id ? {
         ...current,
+        price: updatedOfferPrice ?? current.price,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
         greyMarketReferencePrice: quote.reference_price,
