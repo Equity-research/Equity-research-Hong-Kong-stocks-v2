@@ -10,8 +10,9 @@ def _base(row, adjustment=None) -> dict:
     value = float(adjustment["value"]) if adjustment else 0.0
     final = round(float(row["original_score"]) + value, 1)
     metrics = json.loads(row["metrics_json"])
+    price_low, price_high = display_offer_prices(row, metrics)
     return {"id": row["id"], "name": row["name"], "english_name": row["english_name"], "code": row["code"],
-            "industry": row["industry"], "price_low": row["price_low"], "price_high": row["price_high"],
+            "industry": row["industry"], "price_low": price_low, "price_high": price_high,
             "minimum_subscription_amount": metrics.get("minimum_subscription_amount"),
             "subscription_multiple": metrics.get("subscription_multiple"),
             "deadline": row["deadline"], "is_sample": bool(row["is_sample"]),
@@ -231,3 +232,11 @@ def final_offer_price_from_quote(quote: GreyMarketQuoteValue) -> float | None:
     if quote.offer_price is None or quote.offer_price <= 0:
         return None
     return quote.offer_price
+
+
+def display_offer_prices(row, metrics: dict) -> tuple[float, float]:
+    reference_price = metrics.get("grey_market_reference_price")
+    if metrics.get("grey_market_reference_label") == "昨日收盘价" and isinstance(reference_price, (int, float)) and reference_price > 0:
+        price = float(reference_price)
+        return price, price
+    return float(row["price_low"]), float(row["price_high"])
