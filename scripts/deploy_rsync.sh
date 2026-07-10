@@ -28,6 +28,7 @@ ssh ${SSH_OPTS} "$REMOTE" "rm -rf '$TMP_DIR' && mkdir -p '$TMP_DIR'"
 rsync -az --delete \
   --exclude='.git/' \
   --exclude='.venv/' \
+  --exclude='.local-bin/' \
   --exclude='.pytest_cache/' \
   --exclude='.DS_Store' \
   --exclude='frontend/node_modules/' \
