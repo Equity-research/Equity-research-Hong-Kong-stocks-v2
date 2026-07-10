@@ -4,7 +4,13 @@ const API = import.meta.env.VITE_API_URL ?? '/api'
 const REQUEST_TIMEOUT_MS = 20_000
 const GET_RETRY_COUNT = 2
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+interface RequestOptions extends RequestInit {
+  timeoutMs?: number
+  retryCount?: number
+}
+
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, retryCount, ...fetchOptions } = options ?? {}
   const headers = new Headers(options?.headers)
   const adminKey = window.sessionStorage.getItem('stock-admin-api-key')
   if (adminKey) {
@@ -14,20 +20,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers.set('Content-Type', 'application/json')
   }
   const method = options?.method?.toUpperCase() ?? 'GET'
-  const attempts = method === 'GET' ? GET_RETRY_COUNT + 1 : 1
+  const attempts = (retryCount ?? (method === 'GET' ? GET_RETRY_COUNT : 0)) + 1
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const response = await fetch(`${API}${path}`, { ...options, headers, signal: controller.signal })
+      const response = await fetch(`${API}${path}`, { ...fetchOptions, headers, signal: controller.signal })
       if (!response.ok) {
         const body = await response.json().catch(() => ({ detail: '请求失败' }))
         throw new Error(typeof body.detail === 'string' ? body.detail : '请求失败')
       }
       return response.json() as Promise<T>
     } catch (error) {
-      lastError = error
+      lastError = error instanceof DOMException && error.name === 'AbortError'
+        ? new Error('请求超时，数据刷新仍可能在后台继续，请稍后重试')
+        : error
       if (attempt === attempts - 1) {
         break
       }
@@ -50,9 +58,15 @@ export const api = {
   createReport: () => request<Report>('/reports', { method: 'POST' }),
   startDataRefresh: () => request<DataRefreshStart>('/data-refresh', { method: 'POST' }),
   dataRefreshStatus: (id: string) => request<DataRefreshStatus>(`/data-refresh/${id}`),
-  aShareSentiment: (refresh = false) => request<AShareSentiment>(`/a-shares/sentiment${refresh ? '?refresh=true' : ''}`),
+  aShareSentiment: (refresh = false) => request<AShareSentiment>(
+    `/a-shares/sentiment${refresh ? '?refresh=true' : ''}`,
+    refresh ? { timeoutMs: 120_000, retryCount: 0 } : undefined,
+  ),
   aShareSentimentHistory: () => request<AShareSentimentHistoryPoint[]>('/a-shares/sentiment/history?limit=15'),
-  usMarketDashboard: (refresh = false) => request<USMarketDashboard>(`/us-market/dashboard${refresh ? '?refresh=true' : ''}`),
+  usMarketDashboard: (refresh = false) => request<USMarketDashboard>(
+    `/us-market/dashboard${refresh ? '?refresh=true' : ''}`,
+    refresh ? { timeoutMs: 120_000, retryCount: 0 } : undefined,
+  ),
   rules: () => request<Record<string, unknown>>('/scoring-rules'),
   downloadUrl: (id: number, format: 'md' | 'pdf') => `${API}/reports/${id}/download?format=${format}`,
 }
