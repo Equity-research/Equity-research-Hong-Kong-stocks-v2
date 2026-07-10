@@ -46,6 +46,7 @@ set -euo pipefail
 sudo mkdir -p "$APP_DIR"
 sudo rsync -a --delete \
   --exclude='.venv/' \
+  --exclude='.local-bin/' \
   --exclude='frontend/node_modules/' \
   --exclude='frontend/dist/' \
   --exclude='data/' \
