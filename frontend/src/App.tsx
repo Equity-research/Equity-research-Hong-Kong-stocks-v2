@@ -14,6 +14,8 @@ interface LatestIPO {
   industry: string
   price: string
   offerPriceLabel: string
+  offerPriceLow: number
+  offerPriceHigh: number
   end: string
   minimum: number | null
   sub: number | null
@@ -66,9 +68,12 @@ const offerPriceLabel = (low: number, high: number) => low === high ? '港股最
 const signedPct = (value: number | null) => value == null ? '' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 const isBelowOfferPrice = (item: LatestIPO) => (
   item.greyMarketPrice != null
-  && item.greyMarketReferencePrice != null
-  && (item.greyMarketReferenceLabel === '最终招股价' || item.greyMarketReferenceLabel === '最新招股价')
-  && item.greyMarketPrice < item.greyMarketReferencePrice
+  && item.greyMarketPrice < (
+    item.greyMarketReferencePrice != null
+    && (item.greyMarketReferenceLabel === '最终招股价' || item.greyMarketReferenceLabel === '最新招股价')
+      ? item.greyMarketReferencePrice
+      : item.offerPriceLow
+  )
 )
 const localISODate = () => {
   const now = new Date()
@@ -103,6 +108,8 @@ function toLatestIPO(item: IPODetail): LatestIPO {
     industry: item.industry,
     price: priceText(item.price_low, item.price_high),
     offerPriceLabel: offerPriceLabel(item.price_low, item.price_high),
+    offerPriceLow: item.price_low,
+    offerPriceHigh: item.price_high,
     end: item.deadline,
     minimum: item.minimum_subscription_amount,
     sub: item.subscription_multiple,

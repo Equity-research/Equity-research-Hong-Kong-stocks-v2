@@ -59,6 +59,8 @@ describe('App', () => {
       deadline: '2026-07-02',
       recommendation: '观望',
       final_score: 5,
+      price_low: 5,
+      price_high: 5,
       metrics: {
         grey_market_price: 4.5,
         grey_market_reference_price: 5,
@@ -71,8 +73,8 @@ describe('App', () => {
       code: '08888.HK',
       deadline: '2026-07-01',
       metrics: {
-        grey_market_price: 4.5,
-        grey_market_reference_price: 5,
+        grey_market_price: 46,
+        grey_market_reference_price: 50,
         grey_market_reference_label: '昨日收盘价',
       },
     })
