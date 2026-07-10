@@ -12,8 +12,17 @@ CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-10}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-180}"
 GIT_COMMAND_TIMEOUT="${GIT_COMMAND_TIMEOUT:-90}"
 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=2}"
+RUN_DEPLOY_STEPS="${RUN_DEPLOY_STEPS:-0}"
+JOB_LOG_DIR="${JOB_LOG_DIR:-${APP_DIR}/output/data-job-logs}"
+LOCK_FILE="${LOCK_FILE:-/tmp/stock-data-refresh.lock}"
+STOCK_ADMIN_API_KEY="${STOCK_ADMIN_API_KEY:-}"
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND
+
+ADMIN_HEADER_ARGS=()
+if [ -n "$STOCK_ADMIN_API_KEY" ]; then
+  ADMIN_HEADER_ARGS=(-H "X-Admin-Key: ${STOCK_ADMIN_API_KEY}")
+fi
 
 service_user() {
   local configured_user pid_user pid
@@ -39,7 +48,7 @@ curl_json_to_file() {
   local output_path="$3"
 
   echo "Requesting ${label}; max ${CURL_MAX_TIME}s: ${url}"
-  if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$url" >"$output_path"; then
+  if curl "${ADMIN_HEADER_ARGS[@]}" --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$url" >"$output_path"; then
     echo "${label} saved to ${output_path}"
   else
     local status=$?
@@ -72,29 +81,48 @@ fi
 
 cd "$APP_DIR"
 
-echo "==> 0. Update code"
-git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
-if [ "$(id -u)" = "0" ]; then
-  git config --system --add safe.directory "$APP_DIR" 2>/dev/null || true
+mkdir -p "$JOB_LOG_DIR"
+LOG_FILE="${JOB_LOG_DIR}/data-job-${REPORT_DATE}-$(date +%Y%m%d%H%M%S).log"
+
+exec 9>"$LOCK_FILE"
+if command -v flock >/dev/null 2>&1; then
+  if ! flock -n 9; then
+    echo "Another stock data refresh is already running. Lock: ${LOCK_FILE}"
+    exit 75
+  fi
 fi
 
-STASH_CREATED=0
-if run_timed "Fetching origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git fetch origin "$BRANCH"; then
-  echo "Checking local changes before pulling ${BRANCH}."
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "Local changes detected; stashing before updating ${BRANCH}."
-    run_timed "Stashing local changes" "$GIT_COMMAND_TIMEOUT" git stash push --include-untracked -m "data-job-autostash ${REPORT_DATE} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    STASH_CREATED=1
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "==> Log file: ${LOG_FILE}"
+echo "==> Started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [ "$RUN_DEPLOY_STEPS" = "1" ]; then
+  echo "==> 0. Update code"
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  if [ "$(id -u)" = "0" ]; then
+    git config --system --add safe.directory "$APP_DIR" 2>/dev/null || true
   fi
 
-  run_timed "Checking out ${BRANCH}" "$GIT_COMMAND_TIMEOUT" git checkout "$BRANCH"
-  run_timed "Pulling origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git pull --ff-only origin "$BRANCH"
-else
-  echo "WARNING: git fetch origin/${BRANCH} failed or timed out after ${GIT_COMMAND_TIMEOUT}s; continuing with existing local checkout."
-fi
+  STASH_CREATED=0
+  if run_timed "Fetching origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git fetch origin "$BRANCH"; then
+    echo "Checking local changes before pulling ${BRANCH}."
+    if [ -n "$(git status --porcelain)" ]; then
+      echo "Local changes detected; stashing before updating ${BRANCH}."
+      run_timed "Stashing local changes" "$GIT_COMMAND_TIMEOUT" git stash push --include-untracked -m "data-job-autostash ${REPORT_DATE} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      STASH_CREATED=1
+    fi
 
-if [ "$STASH_CREATED" = "1" ]; then
-  echo "Previous local changes were preserved in git stash."
+    run_timed "Checking out ${BRANCH}" "$GIT_COMMAND_TIMEOUT" git checkout "$BRANCH"
+    run_timed "Pulling origin/${BRANCH}" "$GIT_COMMAND_TIMEOUT" git pull --ff-only origin "$BRANCH"
+  else
+    echo "WARNING: git fetch origin/${BRANCH} failed or timed out after ${GIT_COMMAND_TIMEOUT}s; continuing with existing local checkout."
+  fi
+
+  if [ "$STASH_CREATED" = "1" ]; then
+    echo "Previous local changes were preserved in git stash."
+  fi
+else
+  echo "==> 0. Skip deploy steps; set RUN_DEPLOY_STEPS=1 to pull code, install dependencies, build frontend, and restart service."
 fi
 
 echo "==> 1. Prepare writable directories"
@@ -105,25 +133,36 @@ if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
 
-echo "==> 3. Install/update Python dependencies"
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
+if [ "$RUN_DEPLOY_STEPS" = "1" ]; then
+  echo "==> 3. Install/update Python dependencies"
+  .venv/bin/python -m pip install --upgrade pip
+  .venv/bin/python -m pip install -r requirements.txt
 
-echo "==> 4. Build frontend"
-if command -v pnpm >/dev/null 2>&1; then
-  (cd frontend && pnpm install --frozen-lockfile && pnpm build)
+  echo "==> 4. Build frontend"
+  if command -v pnpm >/dev/null 2>&1; then
+    (cd frontend && pnpm install --frozen-lockfile && pnpm build)
+  else
+    (cd frontend && npm install && npm run build)
+  fi
 else
-  (cd frontend && npm install && npm run build)
+  echo "==> 3. Skip dependency install"
+  echo "==> 4. Skip frontend build"
 fi
 
 echo "==> 5. Run HK IPO data and daily report"
 WAIT_SECONDS="$WAIT_SECONDS" ./scripts/run_all_data.sh "$REPORT_DATE"
 
-echo "==> 6. Restart service"
-systemctl restart "$SERVICE_NAME"
+if [ "$RUN_DEPLOY_STEPS" = "1" ]; then
+  echo "==> 6. Restart service"
+  systemctl restart "$SERVICE_NAME"
+else
+  echo "==> 6. Skip service restart"
+fi
 
 echo "==> 7. Wait for API"
-sleep 3
+if [ "$RUN_DEPLOY_STEPS" = "1" ]; then
+  sleep 3
+fi
 curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time 30 -fsS "http://127.0.0.1:${PORT}/api/health"
 echo
 
@@ -163,4 +202,5 @@ echo
 echo "==> 11. Service status"
 systemctl --no-pager --lines=20 status "$SERVICE_NAME"
 
+echo "==> Finished at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "==> Data job complete"

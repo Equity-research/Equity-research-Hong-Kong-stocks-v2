@@ -8,7 +8,7 @@ def _item(name, english_name, code, industry, price_low, price_high, deadline, m
 
 
 SAMPLE_IPOS = [
-    _item("同仁堂医养", "Beijing Tong Ren Tang Healthcare Investment Co., Ltd.", "02667", "中医医疗服务", 5.48, 6.21, "2026-07-02",
+    _item("同仁堂医养", "Beijing Tong Ren Tang Healthcare Investment Co., Ltd.", "02667", "中医医疗服务", 5.50, 5.50, "2026-07-02",
           {"has_cornerstone": True, "cornerstone_quality_good": True, "greenshoe": True, "is_ah": False,
            "peer_valuation_discount": None, "sponsor_quality_good": True, "subscription_multiple": 127.08,
            "minimum_subscription_amount": 3136.31, "issuance_shares": 108153500, "lot_size": 500,

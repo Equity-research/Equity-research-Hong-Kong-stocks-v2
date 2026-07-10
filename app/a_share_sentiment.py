@@ -1,7 +1,9 @@
 import csv
+import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -17,10 +19,12 @@ from app.config import DATA_DIR, DB_PATH
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 MARKET_URLS = [
+    "https://20.push2.eastmoney.com/api/qt/clist/get",
+    "https://92.push2.eastmoney.com/api/qt/clist/get",
+    "https://push2.eastmoney.com/api/qt/clist/get",
     "https://82.push2.eastmoney.com/api/qt/clist/get",
     "https://90.push2.eastmoney.com/api/qt/clist/get",
     "https://31.push2.eastmoney.com/api/qt/clist/get",
-    "https://push2.eastmoney.com/api/qt/clist/get",
 ]
 MARKET_PARAMS = (
     "po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281"
@@ -32,6 +36,7 @@ MARKET_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_MARKET_FETCH_BUDGET_SECON
 SECTOR_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_SECTOR_FETCH_BUDGET_SECONDS", "20"))
 DISCUSSION_FETCH_BUDGET_SECONDS = float(os.getenv("A_SHARE_DISCUSSION_FETCH_BUDGET_SECONDS", "40"))
 MARKET_MAX_PAGES = int(os.getenv("A_SHARE_MARKET_MAX_PAGES", "80"))
+SINA_MARKET_URL = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
 DISCUSSION_URLS = [
     ("东方财富股吧-上证指数", "https://guba.eastmoney.com/list,zssh000001.html"),
     ("东方财富股吧-深证成指", "https://guba.eastmoney.com/list,zssz399001.html"),
@@ -112,6 +117,23 @@ def bounded_timeout(deadline: float) -> httpx.Timeout:
     return httpx.Timeout(timeout, connect=connect_timeout)
 
 
+def fetch_json(url: str, headers: dict[str, str], deadline: float) -> dict:
+    remaining = remaining_seconds(deadline)
+    if remaining <= 0:
+        raise TimeoutError("A-share data fetch budget exhausted")
+    command = [
+        "curl", "--silent", "--show-error", "--fail", "--location",
+        "--retry", "1", "--retry-delay", "0", "--retry-all-errors",
+        "--connect-timeout", str(max(1, min(3, int(remaining)))),
+        "--max-time", str(max(1, min(int(HTTP_TIMEOUT_SECONDS), int(remaining)))),
+    ]
+    for name, value in headers.items():
+        command.extend(["--header", f"{name}: {value}"])
+    command.append(url)
+    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
+
+
 @dataclass(frozen=True)
 class MarketRow:
     code: str
@@ -166,28 +188,28 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
     market_source = "本地最近行情CSV"
     sector_source = "本地最近板块CSV"
     title_sources = ["本地最近热词CSV"]
-    loaded_from_cache = False
-    fetched_external = False
+    market_fresh = False
+    sectors_fresh = False
+    hot_words_fresh = False
 
     if not refresh:
         market_rows = load_latest_market_rows(record_date)
         hot_words = load_latest_hot_words(record_date)
         hot_sectors = load_latest_hot_sectors(record_date)
-        loaded_from_cache = bool(market_rows or hot_words or hot_sectors)
 
     if refresh or not market_rows:
         market_rows, market_source = fetch_market_rows()
-        fetched_external = fetched_external or bool(market_rows)
+        market_fresh = bool(market_rows)
     if refresh or not hot_sectors:
         hot_sectors, sector_source = fetch_hot_sectors()
-        fetched_external = fetched_external or bool(hot_sectors)
+        sectors_fresh = bool(hot_sectors)
     if refresh or not hot_words:
         titles, title_sources = fetch_discussion_titles()
         if not titles:
             titles = FALLBACK_TITLES
             title_sources = ["fallback"]
         hot_words = extract_hot_words(titles)
-        fetched_external = fetched_external or title_sources != ["fallback"]
+        hot_words_fresh = bool(hot_words) and title_sources != ["fallback"]
 
     if not market_rows:
         market_rows = load_latest_market_rows(record_date)
@@ -202,16 +224,31 @@ def build_a_share_sentiment(record_date: date | None = None, refresh: bool = Fal
         title_sources = ["fallback"]
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    should_write_files = refresh or fetched_external or not loaded_from_cache
-    if should_write_files:
+    existing_market_file = latest_data_path("a_share_market_", record_date)
+    existing_hot_words_file = latest_data_path("a_share_hot_words_", record_date)
+    existing_hot_sectors_file = latest_data_path("a_share_hot_sectors_", record_date)
+    if market_fresh or existing_market_file is None:
         market_file = write_market_rows(record_date, generated_at, market_rows, market_source)
+    else:
+        market_file = existing_market_file
+    if hot_words_fresh or existing_hot_words_file is None:
         hot_words_file = write_hot_words(record_date, generated_at, hot_words, title_sources)
+    else:
+        hot_words_file = existing_hot_words_file
+    if sectors_fresh or existing_hot_sectors_file is None:
         hot_sectors_file = write_hot_sectors(record_date, generated_at, hot_sectors, sector_source)
     else:
-        generated_at = latest_generated_at(record_date) or generated_at
-        market_file = latest_data_path("a_share_market_", record_date) or market_path(record_date)
-        hot_words_file = latest_data_path("a_share_hot_words_", record_date) or hot_words_path(record_date)
-        hot_sectors_file = latest_data_path("a_share_hot_sectors_", record_date) or hot_sectors_path(record_date)
+        hot_sectors_file = existing_hot_sectors_file
+    source_times = [
+        value
+        for value in (
+            generated_at_from_file(market_file),
+            generated_at_from_file(hot_words_file),
+            generated_at_from_file(hot_sectors_file),
+        )
+        if value
+    ]
+    generated_at = min(source_times, default=generated_at)
     priced_rows = [row for row in market_rows if row.price > 0]
     average_price = round(sum(row.price for row in priced_rows) / max(1, len(priced_rows)), 2)
     average_change_pct = round(sum(row.change_pct for row in market_rows) / len(market_rows), 2)
@@ -298,36 +335,76 @@ def ensure_history_table() -> None:
 
 
 def fetch_market_rows() -> tuple[list[MarketRow], str]:
+    sina_rows = fetch_sina_market_rows()
+    if sina_rows:
+        return sina_rows, "新浪财经A股行情"
+
     headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
     deadline = fetch_deadline(MARKET_FETCH_BUDGET_SECONDS)
-    for base_url in MARKET_URLS:
+    rows: list[MarketRow] = []
+    seen: set[str] = set()
+    for page in range(1, MARKET_MAX_PAGES + 1):
         if remaining_seconds(deadline) <= 0:
             break
-        rows: list[MarketRow] = []
-        seen: set[str] = set()
+        payload = None
+        for base_url in MARKET_URLS:
+            try:
+                payload = fetch_json(f"{base_url}?pn={page}&pz=100&{MARKET_PARAMS}", headers, deadline)
+                break
+            except Exception:
+                continue
+        if payload is None:
+            return [], "fallback"
+        data = payload.get("data") or {}
+        items = data.get("diff") or []
+        if not items:
+            break
+        for item in items:
+            row = market_row_from_item(item)
+            if row and row.code not in seen:
+                rows.append(row)
+                seen.add(row.code)
+        total = int(data.get("total") or 0)
+        if total and len(rows) >= total:
+            break
+    return (rows, "东方财富行情快照") if rows else ([], "fallback")
+
+
+def fetch_sina_market_rows() -> list[MarketRow]:
+    deadline = fetch_deadline(MARKET_FETCH_BUDGET_SECONDS)
+    rows: list[MarketRow] = []
+    seen: set[str] = set()
+    for page in range(1, MARKET_MAX_PAGES + 1):
+        if remaining_seconds(deadline) <= 0:
+            return []
+        url = (
+            f"{SINA_MARKET_URL}?page={page}&num=100&sort=symbol&asc=1"
+            "&node=hs_a&symbol=&_s_r_a=page"
+        )
         try:
-            with httpx.Client(follow_redirects=True, headers=headers) as client:
-                for page in range(1, MARKET_MAX_PAGES + 1):
-                    response = client.get(f"{base_url}?pn={page}&pz=100&{MARKET_PARAMS}", timeout=bounded_timeout(deadline))
-                    response.raise_for_status()
-                    payload = response.json()
-                    data = payload.get("data") or {}
-                    items = data.get("diff") or []
-                    if not items:
-                        break
-                    for item in items:
-                        row = market_row_from_item(item)
-                        if row and row.code not in seen:
-                            rows.append(row)
-                            seen.add(row.code)
-                    total = int(data.get("total") or 0)
-                    if total and len(rows) >= total:
-                        break
-            if rows:
-                return rows, "东方财富行情快照"
+            items = fetch_json(url, {}, deadline)
         except Exception:
-            continue
-    return [], "fallback"
+            return []
+        if not isinstance(items, list) or not items:
+            break
+        for item in items:
+            price = parse_float(item.get("trade"))
+            code = str(item.get("code", "")).strip()
+            if price is None or price <= 0 or not code or code in seen:
+                continue
+            rows.append(MarketRow(
+                code=code,
+                name=str(item.get("name", "")).strip(),
+                price=price,
+                change_pct=parse_float(item.get("changepercent")) or 0.0,
+                change=parse_float(item.get("pricechange")) or 0.0,
+                volume=parse_float(item.get("volume")) or 0.0,
+                amount=parse_float(item.get("amount")) or 0.0,
+            ))
+            seen.add(code)
+        if len(items) < 100:
+            break
+    return rows if len(rows) >= 1000 else []
 
 
 def market_row_from_item(item: dict) -> MarketRow | None:
@@ -432,6 +509,14 @@ def latest_generated_at(record_date: date) -> str | None:
     return max(values, default=None)
 
 
+def generated_at_from_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        row = next(csv.DictReader(handle), None)
+    return row.get("generated_at") if row else None
+
+
 def fetch_hot_sectors() -> tuple[list[HotSector], str]:
     headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/center/boardlist.html"}
     deadline = fetch_deadline(SECTOR_FETCH_BUDGET_SECONDS)
@@ -439,10 +524,7 @@ def fetch_hot_sectors() -> tuple[list[HotSector], str]:
         if remaining_seconds(deadline) <= 0:
             break
         try:
-            with httpx.Client(follow_redirects=True, headers=headers) as client:
-                response = client.get(f"{base_url}?pn=1&pz=30&{BOARD_PARAMS}", timeout=bounded_timeout(deadline))
-                response.raise_for_status()
-                payload = response.json()
+            payload = fetch_json(f"{base_url}?pn=1&pz=30&{BOARD_PARAMS}", headers, deadline)
             sectors = []
             for item in (payload.get("data") or {}).get("diff") or []:
                 sector = hot_sector_from_item(item)

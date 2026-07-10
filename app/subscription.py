@@ -13,6 +13,10 @@ from app.csv_io import write_csv_atomic
 HKIPOX_URL = "https://hkipox.com/"
 
 
+class HKIPOxParseError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class SubscriptionRecord:
     record_date: date
@@ -56,16 +60,27 @@ def fetch_hkipox_today_rows() -> list[HKIPOxRow]:
 
 
 def parse_hkipox_today_rows(page: str) -> list[HKIPOxRow]:
-    today_section = re.search(
-        r"<h2[^>]*>\s*今日申购\b.*?</thead>\s*<tbody>(?P<tbody>.*?)</tbody>",
-        page,
-        flags=re.S,
+    heading = next(
+        (
+            match
+            for match in re.finditer(r"<h2\b[^>]*>(?P<body>.*?)</h2>", page, flags=re.S | re.I)
+            if "今日申购" in _text(match.group("body"))
+        ),
+        None,
     )
-    if not today_section:
-        return []
+    if heading is None:
+        raise HKIPOxParseError("HKIPOx 页面缺少“今日申购”区域，可能是页面结构已变化")
+
+    following = page[heading.end():]
+    next_heading = re.search(r"<h2\b", following, flags=re.I)
+    section = following[:next_heading.start()] if next_heading else following
+    tbody = re.search(r"<tbody\b[^>]*>(?P<body>.*?)</tbody>", section, flags=re.S | re.I)
+    if tbody is None:
+        raise HKIPOxParseError("HKIPOx“今日申购”区域缺少数据表")
 
     rows = []
-    for row_html in re.findall(r"<tr\b[^>]*>(.*?)</tr>", today_section.group("tbody"), flags=re.S):
+    row_htmls = re.findall(r"<tr\b[^>]*>(.*?)</tr>", tbody.group("body"), flags=re.S | re.I)
+    for row_html in row_htmls:
         cells = _row_cells(row_html)
         code = cells.get("代码", "").strip()
         name = cells.get("名称", "").strip()
@@ -79,6 +94,8 @@ def parse_hkipox_today_rows(page: str) -> list[HKIPOxRow]:
             expected_listing_date=_parse_date(cells.get("上市日", "")),
             subscription_multiple=_parse_multiple(cells.get("认购倍数", "")),
         ))
+    if row_htmls and not rows:
+        raise HKIPOxParseError("HKIPOx“今日申购”表存在数据行，但关键字段均无法解析")
     return rows
 
 

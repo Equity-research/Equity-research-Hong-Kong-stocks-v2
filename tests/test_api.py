@@ -1,6 +1,45 @@
 import importlib
 from datetime import date, datetime
 from fastapi.testclient import TestClient
+import pytest
+
+
+def test_data_refresh_reuses_running_job(monkeypatch):
+    import app.main as main
+
+    started_jobs = []
+
+    class DummyThread:
+        def __init__(self, target, args, daemon):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            started_jobs.append(self.args)
+
+    main.refresh_jobs.clear()
+    monkeypatch.setattr(main, "Thread", DummyThread)
+    monkeypatch.setattr(main, "acquire_refresh_file_lock", lambda: object())
+    monkeypatch.setattr(main, "release_refresh_file_lock", lambda handle: None)
+
+    first = main.start_data_refresh(date(2026, 7, 10))
+    second = main.start_data_refresh(date(2026, 7, 10))
+
+    assert first == second
+    assert len(started_jobs) == 1
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        main.start_data_refresh(date(2026, 7, 11))
+    assert exc_info.value.status_code == 409
+
+    main.refresh_jobs[first["job_id"]]["status"] = "succeeded"
+    third = main.start_data_refresh(date(2026, 7, 10))
+
+    assert third["job_id"] != first["job_id"]
+    assert len(started_jobs) == 2
+
+    main.refresh_jobs.clear()
 
 
 def test_api_flow(tmp_path, monkeypatch):
@@ -87,13 +126,13 @@ def test_api_flow(tmp_path, monkeypatch):
         assert manual_after_refresh["metrics"]["grey_market_reference_price"] == 5.5
         assert manual_after_refresh["metrics"]["grey_market_reference_label"] == "昨日收盘价"
         assert manual_after_refresh["metrics"]["grey_market_change_pct"] == 4.0
-        assert manual_after_refresh["price_low"] == 5.5
-        assert manual_after_refresh["price_high"] == 5.5
+        assert manual_after_refresh["price_low"] == detail["price_low"]
+        assert manual_after_refresh["price_high"] == detail["price_high"]
         with database.connect() as db:
             db.execute("UPDATE ipos SET price_low=?, price_high=? WHERE id=?", (detail["price_low"], detail["price_high"], ipo_id))
         stale_price_detail = client.get(f"/api/ipos/{ipo_id}").json()
-        assert stale_price_detail["price_low"] == 5.5
-        assert stale_price_detail["price_high"] == 5.5
+        assert stale_price_detail["price_low"] == detail["price_low"]
+        assert stale_price_detail["price_high"] == detail["price_high"]
         finalized = client.post(f"/api/ipos/{ipo_id}/grey-market-price/finalize").json()
         assert finalized["metrics"]["grey_market_finalized"] is True
         monkeypatch.setattr(repository, "fetch_grey_market_quote", lambda code: grey_market.GreyMarketQuote(6.0, datetime.fromisoformat("2026-07-03T16:15:00"), "测试暗盘行情", offer_price=5.0))
@@ -108,17 +147,46 @@ def test_api_flow(tmp_path, monkeypatch):
         assert bad.status_code == 422
         short = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 2, "reason": "太短"})
         assert short.status_code == 422
+        monkeypatch.setenv("STOCK_ADMIN_API_KEY", "test-secret")
+        unauthorized = client.post(
+            f"/api/ipos/{ipo_id}/adjustments",
+            json={"value": 1, "reason": "这是一条没有管理员密钥的调整"},
+        )
+        assert unauthorized.status_code == 401
+        authorized = client.post(
+            f"/api/ipos/{ipo_id}/adjustments",
+            headers={"X-Admin-Key": "test-secret"},
+            json={"value": 1, "reason": "这是一条带有管理员密钥的调整"},
+        )
+        assert authorized.status_code == 201
+        monkeypatch.delenv("STOCK_ADMIN_API_KEY")
         saved = client.post(f"/api/ipos/{ipo_id}/adjustments", json={"value": 1, "reason": "基于本地招股资料的合理人工调整"})
         assert saved.status_code == 201
         first = client.post("/api/reports?report_date=2026-07-02").json()
         second = client.post("/api/reports?report_date=2026-07-02").json()
+        missing_active = client.get("/api/ipos?active=true&report_date=2026-07-08&page_size=100")
+        assert missing_active.status_code == 409
+        missing_report = client.post("/api/reports?report_date=2026-07-08")
+        assert missing_report.status_code == 409
+        (tmp_path / "daily_ipo_2026-07-09.csv").write_text(
+            "record_date,stock_code,company_name,status,subscription_end_date,expected_listing_date,data_source,source_url\n",
+            encoding="utf-8",
+        )
+        empty_active = client.get("/api/ipos?active=true&report_date=2026-07-09&page_size=100")
+        assert empty_active.status_code == 200
+        assert empty_active.json()["total"] == 0
+        empty_report = client.post("/api/reports?report_date=2026-07-09")
+        assert empty_report.status_code == 201
+        assert empty_report.json()["item_count"] == 0
         refreshed = client.get("/api/ipos").json()
         oriental = next(item for item in refreshed["items"] if item["code"] == "01770.HK")
         assert oriental["deadline"] == "2026-07-04"
         reports = client.get("/api/reports").json()
-        assert second["version"] == 1
-        assert len(reports) == 1
-        assert reports[0]["id"] == second["id"]
+        assert first["version"] == 1
+        assert second["version"] == 2
+        assert len(reports) == 3
+        assert reports[0]["id"] == empty_report.json()["id"]
+        assert reports[1]["id"] == second["id"]
         assert first["created_at"] <= second["created_at"]
         assert client.get(f"/api/reports/{second['id']}/download?format=md").status_code == 200
         pdf = client.get(f"/api/reports/{second['id']}/download?format=pdf")
@@ -220,3 +288,32 @@ def test_tencent_quote_uses_previous_close_as_reference(monkeypatch):
     assert quote.price == 3.28
     assert quote.offer_price == 5.5
     assert quote.reference_label == "昨日收盘价"
+
+
+def test_sina_market_fallback_parses_full_market(monkeypatch):
+    import app.a_share_sentiment as sentiment
+
+    monkeypatch.setattr(sentiment, "MARKET_MAX_PAGES", 10)
+
+    def fake_fetch_json(url, headers, deadline):
+        page = int(url.split("page=", 1)[1].split("&", 1)[0])
+        return [
+            {
+                "code": f"{page:02d}{index:04d}",
+                "name": f"测试股票{page}-{index}",
+                "trade": "10.50",
+                "changepercent": "1.25",
+                "pricechange": "0.13",
+                "volume": "1000",
+                "amount": "10500",
+            }
+            for index in range(100)
+        ]
+
+    monkeypatch.setattr(sentiment, "fetch_json", fake_fetch_json)
+
+    rows = sentiment.fetch_sina_market_rows()
+
+    assert len(rows) == 1000
+    assert rows[0].price == 10.5
+    assert rows[0].change_pct == 1.25

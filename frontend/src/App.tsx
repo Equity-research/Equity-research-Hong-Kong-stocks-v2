@@ -13,6 +13,7 @@ interface LatestIPO {
   name: string
   industry: string
   price: string
+  offerPriceLabel: string
   end: string
   minimum: number | null
   sub: number | null
@@ -61,8 +62,14 @@ const tierClass = (tier: Tier) => tier === '申购' ? 'buy' : tier === '观望' 
 const ipoLabel = (item: LatestIPO) => `${item.name}（${item.code}.HK）`
 const shortDate = (value: string) => value.slice(5)
 const priceText = (low: number, high: number) => low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
-const finalOfferPriceText = (label: string | null, value: number | null) => label === '昨日收盘价' && value != null ? priceText(value, value) : null
+const offerPriceLabel = (low: number, high: number) => low === high ? '港股最终招股价' : '港股招股价区间'
 const signedPct = (value: number | null) => value == null ? '' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+const isBelowOfferPrice = (item: LatestIPO) => (
+  item.greyMarketPrice != null
+  && item.greyMarketReferencePrice != null
+  && (item.greyMarketReferenceLabel === '最终招股价' || item.greyMarketReferenceLabel === '最新招股价')
+  && item.greyMarketPrice < item.greyMarketReferencePrice
+)
 const localISODate = () => {
   const now = new Date()
   const offsetMs = now.getTimezoneOffset() * 60 * 1000
@@ -95,6 +102,7 @@ function toLatestIPO(item: IPODetail): LatestIPO {
     name: item.name,
     industry: item.industry,
     price: priceText(item.price_low, item.price_high),
+    offerPriceLabel: offerPriceLabel(item.price_low, item.price_high),
     end: item.deadline,
     minimum: item.minimum_subscription_amount,
     sub: item.subscription_multiple,
@@ -275,8 +283,11 @@ function IPOHistoryModal({ items, referenceDate, onOpen, onClose, onSaveGreyMark
           <summary><span>{shortDate(group.date)} 截止</span><b>{group.items.length} 只</b></summary>
           <div>{group.items.map(item => <article className="ipo-history-item" key={item.code}>
             <button className="ipo-history-main" type="button" onClick={() => onOpen(item)}>
-              <span><strong>{item.name}</strong><small>{item.code}.HK · {item.industry}</small></span>
-              <b className={tierClass(item.tier)}>{item.tier}</b>
+              <span className="ipo-history-title"><strong>{item.name}</strong><small>{item.code}.HK · {item.industry}</small></span>
+              <span className="ipo-history-badges">
+                <b className={tierClass(item.tier)}>{item.tier}</b>
+                {isBelowOfferPrice(item) && <b className="break-badge">破发</b>}
+              </span>
               <em>{item.total.toFixed(0)}分</em>
             </button>
             <GreyMarketInput item={item} onSave={onSaveGreyMarket} onFinalize={onFinalizeGreyMarket} saving={greyMarketLoadingIds.includes(item.id)} />
@@ -298,14 +309,14 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
           <p>{item.code}.HK · {item.industry}</p>
           <b className={tierClass(item.tier)}>{item.tier}</b>
         </div>
-        <p className="drawer-meta">港股招股价区间 {item.price} HKD　截止 {item.end}　最小申购 {money(item.minimum)}　认购倍数 {item.sub == null ? '待补充' : `${item.sub.toFixed(2)} 倍`}</p>
+        <p className="drawer-meta">{item.offerPriceLabel} {item.price} HKD　截止 {item.end}　最小申购 {money(item.minimum)}　认购倍数 {item.sub == null ? '待补充' : `${item.sub.toFixed(2)} 倍`}</p>
         <section><h3>暗盘价格</h3><div className="grey-market-detail">
           <strong>{item.greyMarketPrice == null ? '待获取' : `${item.greyMarketPrice.toFixed(2)} HKD`}</strong>
           {item.greyMarketChangePct != null && <b className={item.greyMarketChangePct < 0 ? 'green' : 'red'}>{signedPct(item.greyMarketChangePct)}</b>}
           <span>{item.greyMarketFetchedAt ? `记录时间 ${formatDateTime(item.greyMarketFetchedAt)} · ${item.greyMarketSource ?? '行情源'} · 按${item.greyMarketReferenceLabel ?? '参考价'} ${item.greyMarketReferencePrice?.toFixed(2) ?? '待获取'} HKD 计算` : '可在历史记录里手动输入暗盘价格；暗盘开始后会尝试获取最新招股价并计算暗盘涨跌幅。'}</span>
         </div></section>
         <section><h3>发行资料</h3><dl className="issue-grid">
-          <div><dt>港股招股价区间</dt><dd>{item.price} HKD</dd></div>
+          <div><dt>{item.offerPriceLabel}</dt><dd>{item.price} HKD</dd></div>
           <div><dt>绿鞋</dt><dd>{item.greenshoe == null ? '待补充' : item.greenshoe ? '有' : '无'}</dd></div>
           <div><dt>基石投资者</dt><dd>{item.cornerstoneInvestors.length ? item.cornerstoneInvestors.join('、') : '待补充'}</dd></div>
           <div><dt>基石占比</dt><dd>{item.cornerstoneRatio == null ? '待补充' : `${item.cornerstoneRatio.toFixed(2)}%`}</dd></div>
@@ -314,7 +325,7 @@ function DetailDrawer({ item, onClose }: { item: LatestIPO | null; onClose: () =
           <div><dt>保荐人</dt><dd>{item.sponsors.length ? item.sponsors.join('、') : '待补充'}</dd></div>
         </dl></section>
         <section><h3>A/H 估值</h3><div className="ah-valuation">
-          <p className="ah-offer-price"><span>港股招股价区间</span><strong>{item.price} HKD</strong></p>
+          <p className="ah-offer-price"><span>{item.offerPriceLabel}</span><strong>{item.price} HKD</strong></p>
           <p>{item.ahPremium == null ? '非 A+H 或数据待补充' : `A股 ${item.aTicker} 最新收盘 ${item.aClose?.toFixed(2)} CNY，CNY/HKD ${item.cnyHkd?.toFixed(4)}，A/H 溢价 ${item.ahPremium.toFixed(1)}%`}</p>
         </div></section>
         <section><h3>公司质地</h3><ul>{item.quality.map(text => <li key={text}>{text}</li>)}</ul></section>
@@ -601,10 +612,8 @@ export default function App() {
     if (!silent) setToastMessage('')
     try {
       const quote = await api.greyMarketPrice(item.id)
-      const updatedOfferPrice = finalOfferPriceText(quote.reference_label, quote.reference_price)
       const patch = (current: LatestIPO) => current.id === item.id ? {
         ...current,
-        price: updatedOfferPrice ?? current.price,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
         greyMarketReferencePrice: quote.reference_price,
@@ -627,10 +636,8 @@ export default function App() {
     setToastMessage('')
     try {
       const quote = await api.saveGreyMarketPrice(item.id, price)
-      const updatedOfferPrice = finalOfferPriceText(quote.reference_label, quote.reference_price)
       const patch = (current: LatestIPO) => current.id === item.id ? {
         ...current,
-        price: updatedOfferPrice ?? current.price,
         greyMarketPrice: quote.price,
         greyMarketChangePct: quote.change_pct,
         greyMarketReferencePrice: quote.reference_price,

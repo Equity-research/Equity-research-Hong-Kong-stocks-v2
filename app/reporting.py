@@ -23,9 +23,14 @@ def _markdown(report_date: date, items: list[dict]) -> str:
              "| 公司 | 代码 | 行业 | 招股价(HKD) | 原始分 | 调整 | 最终分 | 建议 |",
              "|---|---|---|---:|---:|---:|---:|---|"]
     for item in items:
-        lines.append(f"| {item['name']} | {item['code']} | {item['industry']} | {item['price_low']:.2f}-{item['price_high']:.2f} | {item['original_score']:.1f} | {item['adjustment']:+.1f} | {item['final_score']:.1f} | {item['recommendation']} |")
+        price = _offer_price_text(item["price_low"], item["price_high"])
+        lines.append(f"| {item['name']} | {item['code']} | {item['industry']} | {price} | {item['original_score']:.1f} | {item['adjustment']:+.1f} | {item['final_score']:.1f} | {item['recommendation']} |")
     lines += ["", "## 风险提示", "", "- 招股期认购倍数仍可能变化，缺失字段不参与加分。", "- IPO 投资存在价格波动、流动性及信息不完整风险。"]
     return "\n".join(lines) + "\n"
+
+
+def _offer_price_text(low: float, high: float) -> str:
+    return f"{low:.2f}" if low == high else f"{low:.2f}-{high:.2f}"
 
 
 def create_report(report_date: date | None = None) -> dict:
@@ -38,10 +43,13 @@ def create_report(report_date: date | None = None) -> dict:
     active_codes = active_subscription_codes(report_date)
     items = list_ipos(page_size=100, active_codes=active_codes)["items"]
     with connect() as db:
-        version = 1
+        db.execute("BEGIN IMMEDIATE")
+        version = db.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM reports WHERE report_date=?",
+            (report_date.isoformat(),),
+        ).fetchone()[0]
         markdown = _markdown(report_date, items)
         counts = {label: sum(i["recommendation"] == label for i in items) for label in ("申购", "观望", "回避")}
-        db.execute("DELETE FROM reports")
         cursor = db.execute("""INSERT INTO reports
             (report_date, version, created_at, markdown, item_count, buy_count, hold_count, avoid_count)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -53,7 +61,9 @@ def create_report(report_date: date | None = None) -> dict:
 
 def list_reports() -> list[dict]:
     with connect() as db:
-        return [dict(row) for row in db.execute("SELECT * FROM reports ORDER BY created_at DESC LIMIT 1").fetchall()]
+        return [dict(row) for row in db.execute(
+            "SELECT * FROM reports ORDER BY created_at DESC, id DESC LIMIT 30"
+        ).fetchall()]
 
 
 def get_report(report_id: int):

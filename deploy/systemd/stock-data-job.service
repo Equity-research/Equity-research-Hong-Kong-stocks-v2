@@ -10,4 +10,6 @@ Environment=APP_DIR=/opt/stock
 Environment=SERVICE_NAME=stock-api
 Environment=PORT=8080
 Environment=WAIT_SECONDS=0
+Environment=RUN_DEPLOY_STEPS=0
+EnvironmentFile=-/etc/stock/stock.env
 ExecStart=/opt/stock/scripts/tencent_data_job.sh

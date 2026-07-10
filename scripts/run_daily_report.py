@@ -175,11 +175,10 @@ def refresh_daily_inputs(report_date: date) -> tuple[Path, Path]:
         subscription_file = write_subscription_csv(report_date, subscription_records)
         return daily_path, subscription_file
 
-    if not rows:
-        raise RuntimeError("HKIPOx 今日申购表为空，已停止生成日报，避免写入不完整股票池。")
-
     daily_path = write_daily_ipo_from_hkipox(report_date, rows)
     subscription_file = write_subscription_records(report_date, rows)
+    if not rows:
+        print("HKIPOx 今日申购表为空；已写入空的当日 IPO 清单和申购倍数快照。", flush=True)
     return daily_path, subscription_file
 
 

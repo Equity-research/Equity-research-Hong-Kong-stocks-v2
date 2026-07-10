@@ -5,6 +5,17 @@ APP_DIR="${APP_DIR:-/opt/stock}"
 SERVICE_NAME="${SERVICE_NAME:-stock-api}"
 BRANCH="${BRANCH:-main}"
 APP_USER="${APP_USER:-}"
+PORT="${PORT:-8080}"
+GIT_TIMEOUT="${GIT_TIMEOUT:-180}"
+DEPLOY_LOCK="${DEPLOY_LOCK:-/var/lock/${SERVICE_NAME}-deploy.lock}"
+
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$DEPLOY_LOCK"
+  if ! flock -n 9; then
+    echo "Another deploy is already running: $DEPLOY_LOCK" >&2
+    exit 1
+  fi
+fi
 
 service_user() {
   local configured_user pid_user pid
@@ -24,6 +35,21 @@ service_user() {
   id -un
 }
 
+wait_for_health() {
+  local url="http://127.0.0.1:${PORT}/api/health"
+  local attempt
+  for attempt in $(seq 1 20); do
+    if curl --connect-timeout 2 --max-time 5 -fsS "$url" 2>/dev/null; then
+      echo
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: health check failed after restart: $url" >&2
+  sudo systemctl status "$SERVICE_NAME" --no-pager -l >&2 || true
+  return 1
+}
+
 git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 if [ "$(id -u)" = "0" ]; then
   git config --system --add safe.directory "$APP_DIR" 2>/dev/null || true
@@ -31,7 +57,18 @@ fi
 
 cd "$APP_DIR"
 
-git fetch origin "$BRANCH"
+echo "==> Fetch ${BRANCH} from origin with ${GIT_TIMEOUT}s timeout"
+if ! GIT_TERMINAL_PROMPT=0 timeout "$GIT_TIMEOUT" git fetch origin "$BRANCH"; then
+  cat >&2 <<EOF
+ERROR: git fetch timed out or failed.
+
+This server may not be able to reach GitHub reliably. For mainland China
+servers, prefer the local rsync deploy:
+
+  REMOTE=ubuntu@www.stockfenxi.cn scripts/deploy_rsync.sh
+EOF
+  exit 1
+fi
 
 STASH_CREATED=0
 if [ -n "$(git status --porcelain)" ]; then
@@ -41,7 +78,11 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
+echo "==> Pull ${BRANCH} with ${GIT_TIMEOUT}s timeout"
+if ! GIT_TERMINAL_PROMPT=0 timeout "$GIT_TIMEOUT" git pull --ff-only origin "$BRANCH"; then
+  echo "ERROR: git pull timed out or failed." >&2
+  exit 1
+fi
 
 if [ "$STASH_CREATED" = "1" ]; then
   echo "Previous local changes were preserved in git stash."
@@ -66,5 +107,4 @@ sudo systemctl restart "$SERVICE_NAME"
 sudo nginx -t
 sudo systemctl reload nginx
 
-curl -fsS "http://127.0.0.1:8080/api/health"
-echo
+wait_for_health

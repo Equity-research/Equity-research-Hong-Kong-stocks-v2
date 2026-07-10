@@ -227,16 +227,8 @@ def finalize_grey_market_price(ipo_id: int):
 
 
 def final_offer_price_from_quote(quote: GreyMarketQuoteValue) -> float | None:
-    if quote.reference_label != "昨日收盘价":
-        return None
-    if quote.offer_price is None or quote.offer_price <= 0:
-        return None
-    return quote.offer_price
+    return None
 
 
 def display_offer_prices(row, metrics: dict) -> tuple[float, float]:
-    reference_price = metrics.get("grey_market_reference_price")
-    if metrics.get("grey_market_reference_label") == "昨日收盘价" and isinstance(reference_price, (int, float)) and reference_price > 0:
-        price = float(reference_price)
-        return price, price
     return float(row["price_low"]), float(row["price_high"])

@@ -1,11 +1,16 @@
 from datetime import date, datetime
+from contextlib import asynccontextmanager
+import fcntl
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
 from threading import Lock, Thread
+from typing import TextIO
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Query
+from secrets import compare_digest
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -19,10 +24,19 @@ from app.reporting import create_report, list_reports, get_report, report_pdf
 from app.schemas import IPOList, IPODetail, AdjustmentCreate, Adjustment, ReportDetail, ReportSummary, AShareSentiment, AShareSentimentHistoryPoint, DataRefreshStart, DataRefreshStatus, USMarketDashboard, GreyMarketQuote, GreyMarketManualPrice
 from app.us_market import build_us_market_dashboard
 
-app = FastAPI(title="港股 IPO 分析 API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    initialize()
+    yield
+
+
+app = FastAPI(title="港股 IPO 分析 API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://www.stockfenxi.cn",
+    "https://stockfenxi.cn",
     "https://www.equity-research-hong-kong-stocks.cn",
     "https://equity-research-hong-kong-stocks.cn",
 ],
@@ -30,17 +44,25 @@ app.add_middleware(CORSMiddleware, allow_origins=[
 
 refresh_jobs: dict[str, dict] = {}
 refresh_lock = Lock()
+REFRESH_LOCK_FILE = Path(os.getenv("REFRESH_LOCK_FILE", "/tmp/stock-data-refresh.lock"))
 REFRESH_PROGRESS_PATTERN = re.compile(r"\[(\d+)/(\d+)\]\s*(开始|完成|失败)：(.+?)(?:（|$)")
-
-
-@app.on_event("startup")
-def startup():
-    initialize()
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok", "sample_data": False}
+
+
+def validate_admin_api_key(x_admin_key: str | None) -> None:
+    expected = os.getenv("STOCK_ADMIN_API_KEY")
+    if not expected:
+        return
+    if x_admin_key is None or not compare_digest(x_admin_key, expected):
+        raise HTTPException(401, "需要有效的管理员密钥", headers={"WWW-Authenticate": "ApiKey"})
+
+
+def require_admin_api_key(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
+    validate_admin_api_key(x_admin_key)
 
 
 @app.get("/api/ipos", response_model=IPOList)
@@ -66,7 +88,7 @@ def ipo_detail(ipo_id: int):
 
 
 @app.post("/api/ipos/{ipo_id}/adjustments", response_model=Adjustment, status_code=201)
-def adjust(ipo_id: int, payload: AdjustmentCreate):
+def adjust(ipo_id: int, payload: AdjustmentCreate, _: None = Depends(require_admin_api_key)):
     result = add_adjustment(ipo_id, payload.value, payload.reason, payload.operator)
     if not result:
         raise HTTPException(404, "IPO 不存在")
@@ -74,7 +96,7 @@ def adjust(ipo_id: int, payload: AdjustmentCreate):
 
 
 @app.post("/api/ipos/{ipo_id}/grey-market-price", response_model=GreyMarketQuote)
-def grey_market_price(ipo_id: int):
+def grey_market_price(ipo_id: int, _: None = Depends(require_admin_api_key)):
     try:
         result = fetch_and_save_grey_market_price(ipo_id)
     except ValueError as exc:
@@ -85,7 +107,7 @@ def grey_market_price(ipo_id: int):
 
 
 @app.put("/api/ipos/{ipo_id}/grey-market-price", response_model=GreyMarketQuote)
-def manual_grey_market_price(ipo_id: int, payload: GreyMarketManualPrice):
+def manual_grey_market_price(ipo_id: int, payload: GreyMarketManualPrice, _: None = Depends(require_admin_api_key)):
     result = save_manual_grey_market_price(ipo_id, payload.price)
     if not result:
         raise HTTPException(404, "IPO 不存在")
@@ -93,7 +115,7 @@ def manual_grey_market_price(ipo_id: int, payload: GreyMarketManualPrice):
 
 
 @app.post("/api/ipos/{ipo_id}/grey-market-price/finalize", response_model=IPODetail)
-def finalize_grey_market(ipo_id: int):
+def finalize_grey_market(ipo_id: int, _: None = Depends(require_admin_api_key)):
     try:
         result = finalize_grey_market_price(ipo_id)
     except ValueError as exc:
@@ -109,24 +131,42 @@ def scoring_rules():
 
 
 @app.post("/api/data-refresh", response_model=DataRefreshStart, status_code=202)
-def start_data_refresh(report_date: date | None = None):
-    job_id = uuid4().hex
+def start_data_refresh(report_date: date | None = None, _: None = Depends(require_admin_api_key)):
     target_date = report_date or date.today()
-    job = {
-        "job_id": job_id,
-        "status": "running",
-        "started_at": datetime.now(),
-        "finished_at": None,
-        "report_date": target_date,
-        "detail": None,
-        "progress_current": 0,
-        "progress_total": 12,
-        "progress_percent": 0,
-        "progress_label": "等待开始",
-    }
     with refresh_lock:
+        for job in refresh_jobs.values():
+            if job.get("status") == "running":
+                if job.get("report_date") == target_date:
+                    return {"job_id": job["job_id"], "status": "running"}
+                raise HTTPException(
+                    409,
+                    f"已有 {job.get('report_date')} 的刷新任务正在运行，请等待完成后再刷新 {target_date}",
+                )
+        try:
+            lock_handle = acquire_refresh_file_lock()
+        except BlockingIOError as exc:
+            raise HTTPException(423, "另一个数据刷新任务正在运行，请稍后重试") from exc
+        job_id = uuid4().hex
+        job = {
+            "job_id": job_id,
+            "status": "running",
+            "started_at": datetime.now(),
+            "finished_at": None,
+            "report_date": target_date,
+            "detail": None,
+            "progress_current": 0,
+            "progress_total": 12,
+            "progress_percent": 0,
+            "progress_label": "等待开始",
+        }
         refresh_jobs[job_id] = job
-    Thread(target=run_data_refresh_job, args=(job_id, target_date), daemon=True).start()
+    try:
+        Thread(target=run_data_refresh_job, args=(job_id, target_date, lock_handle), daemon=True).start()
+    except Exception:
+        with refresh_lock:
+            refresh_jobs.pop(job_id, None)
+        release_refresh_file_lock(lock_handle)
+        raise
     return {"job_id": job_id, "status": "running"}
 
 
@@ -139,7 +179,27 @@ def data_refresh_status(job_id: str):
     return job
 
 
-def run_data_refresh_job(job_id: str, report_date: date) -> None:
+def acquire_refresh_file_lock() -> TextIO:
+    REFRESH_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handle = REFRESH_LOCK_FILE.open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        raise
+    return handle
+
+
+def release_refresh_file_lock(handle: TextIO | None) -> None:
+    if handle is None or handle.closed:
+        return
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def run_data_refresh_job(job_id: str, report_date: date, lock_handle: TextIO | None = None) -> None:
     output_lines: list[str] = []
     command = [
         sys.executable,
@@ -171,15 +231,18 @@ def run_data_refresh_job(job_id: str, report_date: date) -> None:
     except Exception as exc:
         detail = str(exc)
         status = "failed"
-    with refresh_lock:
-        job = refresh_jobs[job_id]
-        job["status"] = status
-        job["finished_at"] = datetime.now()
-        job["detail"] = detail
-        if status == "succeeded":
-            job["progress_current"] = job.get("progress_total", 12)
-            job["progress_percent"] = 100
-            job["progress_label"] = "全部完成"
+    try:
+        with refresh_lock:
+            job = refresh_jobs[job_id]
+            job["status"] = status
+            job["finished_at"] = datetime.now()
+            job["detail"] = detail
+            if status == "succeeded":
+                job["progress_current"] = job.get("progress_total", 12)
+                job["progress_percent"] = 100
+                job["progress_label"] = "全部完成"
+    finally:
+        release_refresh_file_lock(lock_handle)
 
 
 def prepare_writable_paths(output_lines: list[str]) -> None:
@@ -224,7 +287,13 @@ def update_refresh_progress(job_id: str, line: str, detail: str | None) -> None:
 
 
 @app.get("/api/a-shares/sentiment", response_model=AShareSentiment)
-def a_share_sentiment(record_date: date | None = None, refresh: bool = False):
+def a_share_sentiment(
+    record_date: date | None = None,
+    refresh: bool = False,
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+):
+    if refresh:
+        validate_admin_api_key(x_admin_key)
     return build_a_share_sentiment(record_date, refresh)
 
 
@@ -234,12 +303,18 @@ def a_share_sentiment_history(limit: int = Query(15, ge=1, le=60)):
 
 
 @app.get("/api/us-market/dashboard", response_model=USMarketDashboard)
-def us_market_dashboard(record_date: date | None = None, refresh: bool = False):
+def us_market_dashboard(
+    record_date: date | None = None,
+    refresh: bool = False,
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+):
+    if refresh:
+        validate_admin_api_key(x_admin_key)
     return build_us_market_dashboard(record_date, refresh)
 
 
 @app.post("/api/reports", response_model=ReportDetail, status_code=201)
-def generate_report(report_date: date | None = None):
+def generate_report(report_date: date | None = None, _: None = Depends(require_admin_api_key)):
     try:
         return create_report(report_date)
     except DailyIPODataMissingError as exc:

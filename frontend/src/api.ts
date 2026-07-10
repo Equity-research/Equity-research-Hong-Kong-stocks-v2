@@ -6,6 +6,10 @@ const GET_RETRY_COUNT = 2
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
+  const adminKey = window.sessionStorage.getItem('stock-admin-api-key')
+  if (adminKey) {
+    headers.set('X-Admin-Key', adminKey)
+  }
   if (options?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }

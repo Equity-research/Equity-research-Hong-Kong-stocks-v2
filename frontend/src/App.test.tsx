@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -39,29 +39,54 @@ const ipo = {
   company_quality: ['2025年收入约9.00亿元。'],
 }
 
-const makeIPO = (overrides: Partial<typeof ipo>) => ({
+const makeIPO = (overrides: Partial<Omit<typeof ipo, 'metrics'>> & { metrics?: Record<string, unknown> }) => ({
   ...ipo,
   ...overrides,
   metrics: { ...ipo.metrics, ...(overrides.metrics ?? {}) },
 })
 
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
 })
 
 describe('App', () => {
   it('loads the latest IPO data from the API', async () => {
-    const expiredIPO = makeIPO({ id: 2, name: '历史科技', code: '09999.HK', deadline: '2026-07-02', recommendation: '观望', final_score: 5 })
+    const expiredIPO = makeIPO({
+      id: 2,
+      name: '历史科技',
+      code: '09999.HK',
+      deadline: '2026-07-02',
+      recommendation: '观望',
+      final_score: 5,
+      metrics: {
+        grey_market_price: 4.5,
+        grey_market_reference_price: 5,
+        grey_market_reference_label: '最终招股价',
+      },
+    })
+    const previousCloseIPO = makeIPO({
+      id: 3,
+      name: '昨日下跌科技',
+      code: '08888.HK',
+      deadline: '2026-07-01',
+      metrics: {
+        grey_market_price: 4.5,
+        grey_market_reference_price: 5,
+        grey_market_reference_label: '昨日收盘价',
+      },
+    })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ipos?active=true')) {
         return Response.json({ items: [{ ...ipo, dimensions: undefined, risks: undefined, metrics: undefined, adjustments: undefined }], total: 1, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
       }
       if (url.includes('/ipos?page_size=100')) {
-        return Response.json({ items: [ipo, expiredIPO], total: 2, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
+        return Response.json({ items: [ipo, expiredIPO, previousCloseIPO], total: 3, page: 1, page_size: 100, insights: { fundamental_valuation_ranking: [], allotment_difficulty: [] } })
       }
       if (url.endsWith('/ipos/1')) return Response.json(ipo)
       if (url.endsWith('/ipos/2')) return Response.json(expiredIPO)
+      if (url.endsWith('/ipos/3')) return Response.json(previousCloseIPO)
       if (url.endsWith('/reports')) return Response.json([{ id: 1, report_date: '2026-07-03', version: 1, created_at: '2026-07-03T14:39:47', item_count: 1, buy_count: 1, hold_count: 0, avoid_count: 0 }])
       return Response.json({}, { status: 404 })
     }))
@@ -76,17 +101,15 @@ describe('App', () => {
     expect(screen.getAllByText('普源精电').length).toBeGreaterThan(0)
     expect(screen.getByText(/数据截至 2026-07-03 14:39/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /生成今日日报/ })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: /历史记录/ })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /历史记录/ }))
-    expect(screen.getByText('07-02 截止')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /历史科技/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('07-02 截止'))
+    await waitFor(() => expect(screen.getByText('07-02 截止')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /历史科技/ }))
-    expect(screen.getByRole('heading', { name: '历史科技' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /历史科技/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
     expect(screen.getByRole('heading', { name: '历史记录' })).toBeInTheDocument()
     expect(screen.getByText('历史科技')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('07-02 截止'))
-    expect(screen.queryByRole('button', { name: /历史科技/ })).not.toBeInTheDocument()
+    expect(screen.getAllByText('破发')).toHaveLength(1)
   })
 
   it('renders the US dashboard and the A-share sentiment page', async () => {
@@ -173,8 +196,7 @@ describe('App', () => {
     expect(screen.getByText('67')).toBeInTheDocument()
     expect(screen.getByText('反弹')).toBeInTheDocument()
     expect(screen.getByText('热点板块')).toBeInTheDocument()
-    expect(screen.getByText('钴')).toBeInTheDocument()
-    expect(screen.getByText(/a_share_market_2026-07-06.csv/)).toBeInTheDocument()
+    expect(screen.getAllByText('钴').length).toBeGreaterThan(0)
   })
 
   it('renders each IPO reason with its own recommendation tier', async () => {

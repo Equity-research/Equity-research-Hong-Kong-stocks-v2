@@ -9,41 +9,41 @@ importers:
   .:
     dependencies:
       '@vitejs/plugin-react':
-        specifier: latest
+        specifier: 6.0.3
         version: 6.0.3(vite@8.1.2)
       lucide-react:
-        specifier: latest
+        specifier: 1.22.0
         version: 1.22.0(react@19.2.7)
       react:
-        specifier: latest
+        specifier: 19.2.7
         version: 19.2.7
       react-dom:
-        specifier: latest
+        specifier: 19.2.7
         version: 19.2.7(react@19.2.7)
       typescript:
-        specifier: latest
+        specifier: 6.0.3
         version: 6.0.3
       vite:
-        specifier: latest
+        specifier: 8.1.2
         version: 8.1.2
     devDependencies:
       '@testing-library/jest-dom':
-        specifier: latest
+        specifier: 6.9.1
         version: 6.9.1
       '@testing-library/react':
-        specifier: latest
+        specifier: 16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@types/react':
-        specifier: latest
+        specifier: 19.2.17
         version: 19.2.17
       '@types/react-dom':
-        specifier: latest
+        specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.17)
       jsdom:
-        specifier: latest
+        specifier: 29.1.1
         version: 29.1.1
       vitest:
-        specifier: latest
+        specifier: 4.1.9
         version: 4.1.9(jsdom@29.1.1)(vite@8.1.2)
 
 packages:

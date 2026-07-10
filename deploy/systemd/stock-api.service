@@ -7,6 +7,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/opt/stock
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/stock/stock.env
 ExecStart=/opt/stock/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --proxy-headers
 Restart=always
 RestartSec=5

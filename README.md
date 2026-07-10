@@ -13,6 +13,28 @@ chmod +x run.sh
 
 浏览器访问 `http://127.0.0.1:5173`，API 文档位于 `http://127.0.0.1:8000/docs`。
 
+公网部署时应设置 `STOCK_ADMIN_API_KEY`。设置后，评分调整、暗盘录入、报告生成和数据刷新等写接口必须携带 `X-Admin-Key`：
+
+systemd 部署可将密钥写入仅 root 可读的 `/etc/stock/stock.env`，服务和定时任务都会读取该文件：
+
+```bash
+sudo install -d -m 700 /etc/stock
+printf 'STOCK_ADMIN_API_KEY=%s\n' '替换为高强度随机密钥' | sudo tee /etc/stock/stock.env >/dev/null
+sudo chmod 600 /etc/stock/stock.env
+sudo systemctl daemon-reload
+sudo systemctl restart stock-api
+```
+
+```bash
+curl -H "X-Admin-Key: $STOCK_ADMIN_API_KEY" -X POST http://127.0.0.1:8080/api/data-refresh
+```
+
+浏览器管理操作可在当前标签页的开发者控制台中临时设置密钥，关闭标签页后自动清除：
+
+```js
+sessionStorage.setItem('stock-admin-api-key', '替换为实际密钥')
+```
+
 也可分别启动：
 
 ```bash

@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/stock}"
 SERVICE_NAME="${SERVICE_NAME:-stock-api}"
 PORT="${PORT:-8080}"
-DOMAIN="${DOMAIN:-equity-research-hong-kong-stocks.cn}"
+DOMAIN="${DOMAIN:-stockfenxi.cn}"
 WWW_DOMAIN="${WWW_DOMAIN:-www.${DOMAIN}}"
 NGINX_SITE="${NGINX_SITE:-stock.conf}"
 FRONTEND_DIR="${FRONTEND_DIR:-${APP_DIR}/frontend/dist}"
