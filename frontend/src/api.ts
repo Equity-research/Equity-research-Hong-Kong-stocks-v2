@@ -35,6 +35,8 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
     } catch (error) {
       lastError = error instanceof DOMException && error.name === 'AbortError'
         ? new Error('请求超时，数据刷新仍可能在后台继续，请稍后重试')
+        : error instanceof TypeError
+          ? new Error('无法连接数据服务，请检查网络或确认服务已启动')
         : error
       if (attempt === attempts - 1) {
         break

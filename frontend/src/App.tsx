@@ -647,8 +647,8 @@ export default function App() {
         greyMarketFinalized: false,
       } : current
       patchIPO(patch)
-    } catch {
-      setToastMessage('暗盘价格保存失败，请稍后再试')
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : '暗盘价格保存失败，请稍后再试')
     } finally {
       setGreyMarketLoadingIds(ids => ids.filter(id => id !== item.id))
     }
@@ -662,8 +662,8 @@ export default function App() {
       const detail = await api.finalizeGreyMarketPrice(item.id)
       const next = toLatestIPO(detail)
       patchIPO(current => current.id === item.id ? next : current)
-    } catch {
-      setToastMessage('暗盘价格完成录入失败，请稍后再试')
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : '暗盘价格完成录入失败，请稍后再试')
     } finally {
       setGreyMarketLoadingIds(ids => ids.filter(id => id !== item.id))
     }
